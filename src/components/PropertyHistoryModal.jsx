@@ -12,6 +12,15 @@ function makeContractId(owner, prop){
 }
 function money(n){ return Number(n||0).toLocaleString("es-CL",{style:"currency",currency:"CLP",maximumFractionDigits:0}); }
 
+/** Toma el primer valor definido/no vacío entre varias claves posibles */
+function pick(obj, keys=[], fallback=""){
+  for(const k of keys){
+    const v = obj?.[k];
+    if(v !== undefined && v !== null && String(v).trim() !== "") return v;
+  }
+  return fallback;
+}
+
 export default function PropertyHistoryModal({
   open,
   onClose,
@@ -49,13 +58,25 @@ export default function PropertyHistoryModal({
   useEffect(()=>{
     if(!open) return;
     setEditMode(false);
+
+    // Compatibilidad de nombres (alias). Ej.: direccionPropiedad -> direccion
+    const direccion = pick(contract, ["direccion", "direccionPropiedad", "direccion_propiedad"], "");
+    const fechaInicio = pick(contract, ["fechaInicio", "inicioContrato", "inicio"], "");
+    const fechaTermino = pick(contract, ["fechaTermino", "vencimientoContrato", "vencimiento", "termino"], "");
+    const fechaAviso = pick(contract, ["fechaAviso", "avisoRenovacion", "aviso"], "");
+    const valorArriendo = pick(contract, ["valorArriendo", "montoArriendo"], "");
+    const garantia = pick(contract, ["garantia", "montoGarantia"], "");
+    const pdfUrl = pick(contract, ["pdfUrl", "contratoPdf", "pdfContrato"], "");
+    const owner = pick(contract, ["owner"], ownerName||"");
+    const property = pick(contract, ["property"], propertyName||"");
+
     setForm({
-      direccion:      typeof contract?.direccion==="string" ? contract.direccion : "",
-      fechaInicio:    typeof contract?.fechaInicio==="string" ? contract.fechaInicio : "",
-      fechaTermino:   typeof contract?.fechaTermino==="string" ? contract.fechaTermino : "",
-      fechaAviso:     typeof contract?.fechaAviso==="string" ? contract.fechaAviso : "",
-      valorArriendo:  contract?.valorArriendo ?? "",
-      garantia:       contract?.garantia ?? "",
+      direccion,
+      fechaInicio,
+      fechaTermino,
+      fechaAviso,
+      valorArriendo,
+      garantia,
       arrendatario:   typeof contract?.arrendatario==="string" ? contract.arrendatario : "",
       correo:         typeof contract?.correo==="string" ? contract.correo : "",
       telefono:       typeof contract?.telefono==="string" ? contract.telefono : "",
@@ -63,9 +84,9 @@ export default function PropertyHistoryModal({
       correoAval:     typeof contract?.correoAval==="string" ? contract.correoAval : "",
       telefonoAval:   typeof contract?.telefonoAval==="string" ? contract.telefonoAval : "",
       reajusteMonths: Array.isArray(contract?.reajusteMonths)? contract.reajusteMonths : [],
-      pdfUrl:         typeof contract?.pdfUrl==="string" ? contract.pdfUrl : "",
-      owner:          typeof contract?.owner==="string" ? contract.owner : (ownerName||""),
-      property:       typeof contract?.property==="string" ? contract.property : (propertyName||""),
+      pdfUrl,
+      owner,
+      property,
     });
   },[open, contract, ownerName, propertyName]);
 
@@ -77,18 +98,25 @@ export default function PropertyHistoryModal({
 
   const handleSave = async ()=>{
     if(role!=="admin"){ onShowToast("SOLO LECTURA","error"); return; }
-    const idNatural = makeContractId(form.owner || ownerName, form.property || propertyName);
+    const finalOwner = form.owner || ownerName;
+    const finalProperty = form.property || propertyName;
+    const idNatural = makeContractId(finalOwner, finalProperty);
+
+    // Guardamos en canónico y duplicamos la dirección en direccionPropiedad para compatibilidad
     const payload = {
       ...form,
-      owner: form.owner || ownerName,
-      property: form.property || propertyName,
-      ownerSlug: slug(form.owner || ownerName),
-      propertySlug: slug(form.property || propertyName),
+      owner: finalOwner,
+      property: finalProperty,
+      ownerSlug: slug(finalOwner),
+      propertySlug: slug(finalProperty),
+      direccion: form.direccion || "",
+      direccionPropiedad: form.direccion || "",
       updatedAt: Date.now(),
     };
+
     try{
       await setDoc(doc(db,"contracts",idNatural), payload, { merge:true });
-      onContractSaved(ownerName, propertyName, payload);
+      onContractSaved(finalOwner, finalProperty, payload);
       setEditMode(false);
       onShowToast("CONTRATO GUARDADO","success");
     }catch(e){
@@ -134,7 +162,7 @@ export default function PropertyHistoryModal({
                 })}
               </div>
 
-              {/* Detalle contrato */}
+              {/* Detalle contrato (con DIRECCIÓN compatible) */}
               <div className="section-title">DETALLE</div>
               <div className="contract-grid">
                 <div className="c-label">DIRECCIÓN</div>
@@ -226,7 +254,7 @@ export default function PropertyHistoryModal({
                   {editMode ? (
                     <>
                       <button className="btn btn-secondary btn-sm" onClick={()=>setReajustePicker(v=>!v)}>
-                        {form.reajusteMonths?.length ? form.reajusteMonths.join("-") : "SELECCIONAR MESES ▾"}
+                        {Array.isArray(form.reajusteMonths) && form.reajusteMonths.length ? form.reajusteMonths.join("-") : "SELECCIONAR MESES ▾"}
                       </button>
                       {reajustePicker && (
                         <div className="sum-dropdown" style={{position:"relative", marginTop:"6px"}}>

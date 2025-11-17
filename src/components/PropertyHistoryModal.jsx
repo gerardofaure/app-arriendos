@@ -7,16 +7,19 @@ function slug(str){
   return String(str||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")
     .replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
 }
-function makeContractId(owner, prop){
-  return `${owner}__${prop}`;
+function makeContractId(owner, prop){ return `${owner}__${prop}`; }
+function makeIds(owner, prop){
+  const nat = makeContractId(owner, prop);
+  const norm = `${slug(owner)}__${slug(prop)}`;
+  return [nat, norm];
 }
 function money(n){ return Number(n||0).toLocaleString("es-CL",{style:"currency",currency:"CLP",maximumFractionDigits:0}); }
 
-/** Toma el primer valor definido/no vacío entre varias claves posibles */
+/** Devuelve el primer valor definido/no vacío entre varias claves */
 function pick(obj, keys=[], fallback=""){
   for(const k of keys){
     const v = obj?.[k];
-    if(v !== undefined && v !== null && String(v).trim() !== "") return v;
+    if(v !== undefined && v !== null && String(v)?.trim() !== "") return v;
   }
   return fallback;
 }
@@ -36,6 +39,8 @@ export default function PropertyHistoryModal({
   const safeHistory = Array.isArray(history) ? history : [];
 
   const [editMode, setEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+
   const [form, setForm] = useState({
     direccion:"",
     fechaInicio:"",
@@ -58,15 +63,16 @@ export default function PropertyHistoryModal({
   useEffect(()=>{
     if(!open) return;
     setEditMode(false);
+    setSaving(false);
 
-    // Compatibilidad de nombres (alias). Ej.: direccionPropiedad -> direccion
-    const direccion = pick(contract, ["direccion", "direccionPropiedad", "direccion_propiedad"], "");
-    const fechaInicio = pick(contract, ["fechaInicio", "inicioContrato", "inicio"], "");
-    const fechaTermino = pick(contract, ["fechaTermino", "vencimientoContrato", "vencimiento", "termino"], "");
-    const fechaAviso = pick(contract, ["fechaAviso", "avisoRenovacion", "aviso"], "");
-    const valorArriendo = pick(contract, ["valorArriendo", "montoArriendo"], "");
-    const garantia = pick(contract, ["garantia", "montoGarantia"], "");
-    const pdfUrl = pick(contract, ["pdfUrl", "contratoPdf", "pdfContrato"], "");
+    // Alias compatibles (lectura)
+    const direccion = pick(contract, ["direccion","direccionPropiedad","direccion_propiedad"], "");
+    const fechaInicio = pick(contract, ["fechaInicio","inicioContrato","inicio","fecha_de_inicio","inicio_contrato"], "");
+    const fechaTermino = pick(contract, ["fechaTermino","vencimientoContrato","vencimiento","termino","fecha_de_termino","termino_contrato"], "");
+    const fechaAviso = pick(contract, ["fechaAviso","avisoRenovacion","avisoDeRenovacion","fechaAvisoRenovacion","fecha_aviso","aviso_renovacion","aviso"], "");
+    const valorArriendo = pick(contract, ["valorArriendo","montoArriendo","arriendo","valor_arriendo"], "");
+    const garantia = pick(contract, ["garantia","montoGarantia","garantiaMonto","monto_de_garantia","montoGarantía"], "");
+    const pdfUrl = pick(contract, ["pdfUrl","contratoPdf","pdfContrato","urlContrato"], "");
     const owner = pick(contract, ["owner"], ownerName||"");
     const property = pick(contract, ["property"], propertyName||"");
 
@@ -97,30 +103,55 @@ export default function PropertyHistoryModal({
   const handleChange = (k,v)=> setForm(prev=>({...prev,[k]:v}));
 
   const handleSave = async ()=>{
-    if(role!=="admin"){ onShowToast("SOLO LECTURA","error"); return; }
+    if(role!=="admin"){
+      onShowToast("SOLO LECTURA. Ingresa como admin para guardar.", "error");
+      return;
+    }
     const finalOwner = form.owner || ownerName;
     const finalProperty = form.property || propertyName;
-    const idNatural = makeContractId(finalOwner, finalProperty);
+    const [nat, norm] = makeIds(finalOwner, finalProperty);
 
-    // Guardamos en canónico y duplicamos la dirección en direccionPropiedad para compatibilidad
+    // Payload canónico + alias de compatibilidad
     const payload = {
       ...form,
       owner: finalOwner,
       property: finalProperty,
       ownerSlug: slug(finalOwner),
       propertySlug: slug(finalProperty),
+
+      // Normalizamos campos importantes
       direccion: form.direccion || "",
       direccionPropiedad: form.direccion || "",
+
+      fechaAviso: form.fechaAviso || "",
+      avisoRenovacion: form.fechaAviso || "",
+      fechaAvisoRenovacion: form.fechaAviso || "",
+
+      garantia: form.garantia || "",
+      montoGarantia: form.garantia || "",
+      garantiaMonto: form.garantia || "",
+
       updatedAt: Date.now(),
     };
 
+    setSaving(true);
     try{
-      await setDoc(doc(db,"contracts",idNatural), payload, { merge:true });
+      // Guardamos en AMBOS IDs para evitar desincronización (natural y normalizado)
+      await Promise.all([
+        setDoc(doc(db,"contracts",nat), payload, { merge:true }),
+        setDoc(doc(db,"contracts",norm), payload, { merge:true }),
+      ]);
+
+      // Refrescamos el cache local de la app
       onContractSaved(finalOwner, finalProperty, payload);
+
       setEditMode(false);
-      onShowToast("CONTRATO GUARDADO","success");
+      onShowToast("CONTRATO GUARDADO", "success");
     }catch(e){
-      onShowToast("NO SE PUDO GUARDAR EL CONTRATO","error");
+      onShowToast(`NO SE PUDO GUARDAR: ${e?.code||""} ${e?.message||""}`, "error");
+      console.error("Guardar contrato error:", e);
+    }finally{
+      setSaving(false);
     }
   };
 
@@ -128,11 +159,11 @@ export default function PropertyHistoryModal({
   const [reajustePicker, setReajustePicker] = useState(false);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={saving ? undefined : onClose}>
       <div className="modal-card history-modal-card" onClick={(e)=>e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">HISTORIAL • {ownerName} / {propertyName}</div>
-          <button className="modal-close" onClick={onClose}>×</button>
+          <button className="modal-close" onClick={saving ? undefined : onClose}>×</button>
         </div>
 
         <div className="modal-body">
@@ -162,90 +193,90 @@ export default function PropertyHistoryModal({
                 })}
               </div>
 
-              {/* Detalle contrato (con DIRECCIÓN compatible) */}
+              {/* Detalle contrato */}
               <div className="section-title">DETALLE</div>
-              <div className="contract-grid">
+              <div className={`contract-grid ${saving ? "disabled":""}`}>
                 <div className="c-label">DIRECCIÓN</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" value={form.direccion} onChange={(e)=>handleChange("direccion",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} value={form.direccion} onChange={(e)=>handleChange("direccion",e.target.value)}/>
                   ) : (form.direccion||"—")}
                 </div>
 
                 <div className="c-label">INICIO</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" placeholder="DD-MM-AAAA" value={form.fechaInicio} onChange={(e)=>handleChange("fechaInicio",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} placeholder="DD-MM-AAAA" value={form.fechaInicio} onChange={(e)=>handleChange("fechaInicio",e.target.value)}/>
                   ) : (form.fechaInicio||"—")}
                 </div>
 
                 <div className="c-label">VENCE</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" placeholder="DD-MM-AAAA" value={form.fechaTermino} onChange={(e)=>handleChange("fechaTermino",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} placeholder="DD-MM-AAAA" value={form.fechaTermino} onChange={(e)=>handleChange("fechaTermino",e.target.value)}/>
                   ) : (form.fechaTermino||"—")}
                 </div>
 
                 <div className="c-label">AVISO</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" placeholder="DD-MM-AAAA" value={form.fechaAviso} onChange={(e)=>handleChange("fechaAviso",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} placeholder="DD-MM-AAAA" value={form.fechaAviso} onChange={(e)=>handleChange("fechaAviso",e.target.value)}/>
                   ) : (form.fechaAviso||"—")}
                 </div>
 
                 <div className="c-label">VALOR ARRIENDO</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" type="number" value={form.valorArriendo} onChange={(e)=>handleChange("valorArriendo",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} type="number" value={form.valorArriendo} onChange={(e)=>handleChange("valorArriendo",e.target.value)}/>
                   ) : (form.valorArriendo ? money(form.valorArriendo) : "—")}
                 </div>
 
                 <div className="c-label">GARANTÍA</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" value={form.garantia} onChange={(e)=>handleChange("garantia",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} value={form.garantia} onChange={(e)=>handleChange("garantia",e.target.value)}/>
                   ) : (form.garantia||"—")}
                 </div>
 
                 <div className="c-label">ARRENDATARIO</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" value={form.arrendatario} onChange={(e)=>handleChange("arrendatario",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} value={form.arrendatario} onChange={(e)=>handleChange("arrendatario",e.target.value)}/>
                   ) : (form.arrendatario||"—")}
                 </div>
 
                 <div className="c-label">CORREO</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" value={form.correo} onChange={(e)=>handleChange("correo",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} value={form.correo} onChange={(e)=>handleChange("correo",e.target.value)}/>
                   ) : (form.correo||"—")}
                 </div>
 
                 <div className="c-label">TELÉFONO</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" value={form.telefono} onChange={(e)=>handleChange("telefono",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} value={form.telefono} onChange={(e)=>handleChange("telefono",e.target.value)}/>
                   ) : (form.telefono||"—")}
                 </div>
 
                 <div className="c-label">AVAL</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" value={form.aval} onChange={(e)=>handleChange("aval",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} value={form.aval} onChange={(e)=>handleChange("aval",e.target.value)}/>
                   ) : (form.aval||"—")}
                 </div>
 
                 <div className="c-label">CORREO AVAL</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" value={form.correoAval} onChange={(e)=>handleChange("correoAval",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} value={form.correoAval} onChange={(e)=>handleChange("correoAval",e.target.value)}/>
                   ) : (form.correoAval||"—")}
                 </div>
 
                 <div className="c-label">TELÉFONO AVAL</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" value={form.telefonoAval} onChange={(e)=>handleChange("telefonoAval",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} value={form.telefonoAval} onChange={(e)=>handleChange("telefonoAval",e.target.value)}/>
                   ) : (form.telefonoAval||"—")}
                 </div>
 
@@ -253,7 +284,7 @@ export default function PropertyHistoryModal({
                 <div className="c-val">
                   {editMode ? (
                     <>
-                      <button className="btn btn-secondary btn-sm" onClick={()=>setReajustePicker(v=>!v)}>
+                      <button className="btn btn-secondary btn-sm" disabled={saving} onClick={()=>setReajustePicker(v=>!v)}>
                         {Array.isArray(form.reajusteMonths) && form.reajusteMonths.length ? form.reajusteMonths.join("-") : "SELECCIONAR MESES ▾"}
                       </button>
                       {reajustePicker && (
@@ -262,6 +293,7 @@ export default function PropertyHistoryModal({
                             <label key={m} className="sum-dropdown-item">
                               <input
                                 type="checkbox"
+                                disabled={saving}
                                 checked={Array.isArray(form.reajusteMonths) && form.reajusteMonths.includes(m)}
                                 onChange={(e)=>{
                                   const checked = e.target.checked;
@@ -285,7 +317,7 @@ export default function PropertyHistoryModal({
                 <div className="c-label">CONTRATO</div>
                 <div className="c-val">
                   {editMode ? (
-                    <input className="calc-input" placeholder="https://...pdf" value={form.pdfUrl} onChange={(e)=>handleChange("pdfUrl",e.target.value)}/>
+                    <input className="calc-input" disabled={saving} placeholder="https://...pdf" value={form.pdfUrl} onChange={(e)=>handleChange("pdfUrl",e.target.value)}/>
                   ) : (
                     form.pdfUrl
                       ? <a href={form.pdfUrl} target="_blank" rel="noreferrer">DESCARGAR</a>
@@ -298,11 +330,13 @@ export default function PropertyHistoryModal({
                 {role==="admin" ? (
                   editMode ? (
                     <>
-                      <button className="btn btn-secondary" onClick={()=>setEditMode(false)}>CANCELAR</button>
-                      <button className="btn btn-primary" onClick={handleSave}>GUARDAR</button>
+                      <button className="btn btn-secondary" disabled={saving} onClick={()=>setEditMode(false)}>CANCELAR</button>
+                      <button className="btn btn-primary" disabled={saving} onClick={handleSave}>
+                        {saving ? "GUARDANDO…" : "GUARDAR"}
+                      </button>
                     </>
                   ) : (
-                    <button className="btn btn-secondary" onClick={()=>setEditMode(true)}>ENTRAR EDITAR</button>
+                    <button className="btn btn-secondary" disabled={saving} onClick={()=>setEditMode(true)}>ENTRAR EDITAR</button>
                   )
                 ) : (
                   <button className="btn btn-secondary" onClick={()=>onShowToast("SOLO LECTURA","error")}>ENTRAR EDITAR</button>

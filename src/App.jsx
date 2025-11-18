@@ -1,458 +1,417 @@
-// src/App.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import OwnerGroup from "./components/OwnerGroup.jsx";
 import PropertyHistoryModal from "./components/PropertyHistoryModal.jsx";
+import MessagesModal from "./components/MessagesModal.jsx";
+import ReajustesModal from "./components/ReajustesModal.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { OWNERS as FALLBACK_OWNERS } from "./data/properties.js";
 import { generateMonthRange, monthIdToParts, getPrevMonthId } from "./utils/months.js";
 import { db } from "./firebase.js";
-import { doc, getDoc, setDoc, collection, onSnapshot, serverTimestamp } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  collection,
+  onSnapshot,
+  serverTimestamp,
+} from "firebase/firestore";
 
-/* ===== Utiles ===== */
-const MONTH_ABBR = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
-const abbrFromMonthId = (id) => MONTH_ABBR[Number(id.slice(5,7)) - 1];
-const money = (n)=> Number(n||0).toLocaleString("es-CL",{style:"currency",currency:"CLP",maximumFractionDigits:0});
-const slug = (str)=> String(str||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
-const makeContractIds = (ownerName, propertyName)=>{
-  const safeOwner = String(ownerName??"").trim();
-  const safeProp  = String(propertyName??"").trim();
-  return [`${safeOwner}__${safeProp}`, `${slug(safeOwner)}__${slug(safeProp)}`];
+/* ===== Helpers ===== */
+const moneyCLP0 = (n) =>
+  Number(n || 0).toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+const moneyCLP2 = (n) =>
+  Number(n || 0).toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+const norm = (str) =>
+  String(str || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+
+const normId = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+
+const canonicalDocId = (owner, property) => `${normId(owner)}__${normId(property)}`;
+
+const pickKeyCI = (obj, targetName) => {
+  if (!obj) return null;
+  const want = norm(targetName);
+  for (const k of Object.keys(obj)) {
+    if (norm(k) === want) return k;
+  }
+  return null;
 };
-function parseFlexibleDate(str){
-  if(!str) return null;
-  const s=String(str).trim();
-  if(/^\d{2}-\d{2}-\d{4}$/.test(s)){ const [dd,mm,yyyy]=s.split("-").map(Number); const d=new Date(yyyy,mm-1,dd); return isNaN(d)?null:d; }
-  if(/^\d{4}-\d{2}-\d{2}$/.test(s)){ const d=new Date(s); return isNaN(d)?null:d; }
-  return null;
-}
-function formatCLDate(dateStr){
-  if(!dateStr) return "";
-  const d=new Date(dateStr); if(isNaN(d)) return dateStr;
-  const dd=String(d.getDate()).padStart(2,"0"), mm=String(d.getMonth()+1).padStart(2,"0"), yyyy=d.getFullYear();
-  return `${dd}-${mm}-${yyyy}`;
-}
-function generateNext15Days(fromDateStr,lastValue){
-  const base=new Date(fromDateStr); if(isNaN(base)) return [];
-  const arr=[]; for(let i=1;i<=15;i++){ const d=new Date(base); d.setDate(d.getDate()+i); arr.push({fecha:d.toISOString(),valor:lastValue,estimado:true}); }
-  return arr;
-}
-function findContractData(ownerName, propertyName, contractMap){
-  if(!contractMap) return null;
-  const [nat,norm]=makeContractIds(ownerName,propertyName);
-  if(contractMap[nat]) return {id:nat,...contractMap[nat]};
-  if(contractMap[norm]) return {id:norm,...contractMap[norm]};
-  // fallback por slug
-  const wantOwner=slug(ownerName||""), wantProp=slug(propertyName||"");
-  for(const [id,data] of Object.entries(contractMap)){
-    if(slug(data?.owner||"")===wantOwner && slug(data?.property||"")===wantProp) return {id,...data};
-  }
-  // fallback por parte derecha del id
-  for(const [id,data] of Object.entries(contractMap)){
-    const parts=id.split("__"); const idProp=parts.slice(1).join("__");
-    if(slug(idProp)===wantProp) return {id,...data};
-  }
-  return null;
-}
 
-/* ========== App Core ========== */
-function AppCore(){
+/* ===== App ===== */
+function AppCore() {
   /* Login */
-  const [role,setRole]=useState(null);
-  const [loginUser,setLoginUser]=useState(""); const [loginPass,setLoginPass]=useState(""); const [loginError,setLoginError]=useState("");
+  const [role, setRole] = useState(null); // "viewer" | "admin" | null
+  const [loginUser, setLoginUser] = useState("");
+  const [loginPass, setLoginPass] = useState("");
+  const [loginError, setLoginError] = useState("");
 
   /* Mes/Año */
-  const monthList = useMemo(()=>generateMonthRange(new Date(),18,1),[]);
-  const today=new Date(); const todayId=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
-  const [selectedMonthId,setSelectedMonthId]=useState(todayId);
-  const [selectedYear,setSelectedYear]=useState(today.getFullYear());
-  const yearList=useMemo(()=>{const a=[]; for(let y=today.getFullYear(); y>=today.getFullYear()-5; y--) a.push(y); return a;},[]);
+  const monthList = useMemo(() => generateMonthRange(new Date(), 18, 1), []);
+  const today = new Date();
+  const todayId = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const [selectedMonthId, setSelectedMonthId] = useState(todayId);
+  const [selectedYear, setSelectedYear] = useState(today.getFullYear());
+  const { year: selYear, month, monthName } = monthIdToParts(selectedMonthId);
+  const activeMonthLabel = useMemo(() => {
+    const f = monthList.find((m) => m.id === selectedMonthId);
+    return (f ? f.label : `${monthName} ${selYear}`).toUpperCase();
+  }, [monthList, selectedMonthId, monthName, selYear]);
+  const selectedMonthNumber = useMemo(() => Number(selectedMonthId.slice(5, 7)), [selectedMonthId]);
 
-  /* Base */
-  const [owners,setOwners]=useState(FALLBACK_OWNERS);
-  const [appTitle,setAppTitle]=useState("INFORME MENSUAL DE ARRIENDOS");
-  const [viewMode,setViewMode]=useState("MONTH"); // MONTH | YEAR
-  const [darkMode,setDarkMode]=useState(false);
+  /* Estado */
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState({ show: false, message: "", type: "info" });
 
-  /* Estado de carga */
-  const [loading,setLoading]=useState(true), [saving,setSaving]=useState(false);
-  const [error,setError]=useState(""), [errorDetail,setErrorDetail]=useState("");
+  /* Datos */
+  const [owners, setOwners] = useState(FALLBACK_OWNERS);
+  const [appTitle, setAppTitle] = useState("INFORME MENSUAL DE ARRIENDOS");
+  const [viewMode, setViewMode] = useState("MONTH"); // "MONTH" | "YEAR"
+  const [dataCurrent, setDataCurrent] = useState({});
+  const [dataPrev, setDataPrev] = useState({});
+  const [dataAnnual, setDataAnnual] = useState({});
+  const [editing, setEditing] = useState(false);
 
-  /* Datos de arriendo */
-  const [dataCurrent,setDataCurrent]=useState({}); const [dataPrev,setDataPrev]=useState({}); const [dataAnnual,setDataAnnual]=useState({});
+  /* Filtros/UI */
+  const [ownerFilter, setOwnerFilter] = useState("ALL");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [headerMonthOpen, setHeaderMonthOpen] = useState(false);
 
-  /* Edición */
-  const [editing,setEditing]=useState(false);
+  /* Historial */
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyOwner, setHistoryOwner] = useState("");
+  const [historyProperty, setHistoryProperty] = useState("");
+  const [historyData, setHistoryData] = useState([]);
 
-  /* Filtros */
-  const [ownerFilter,setOwnerFilter]=useState("ALL");
-  const [searchTerm,setSearchTerm]=useState("");
+  /* Contracts realtime + cache */
+  const [allContracts, setAllContracts] = useState({});
+  const [contractData, setContractData] = useState(null);
 
-  /* Historial (modal) */
-  const [historyOpen,setHistoryOpen]=useState(false);
-  const [historyLoading,setHistoryLoading]=useState(false);
-  const [historyOwner,setHistoryOwner]=useState("");
-  const [historyProperty,setHistoryProperty]=useState("");
-  const [historyData,setHistoryData]=useState([]);
-  const [contractData,setContractData]=useState(null);
+  /* UF + Calculadora */
+  const [ufToday, setUfToday] = useState(null);
+  const [ufPast, setUfPast] = useState([]);
+  const [ufFuture, setUfFuture] = useState([]);
+  const [ufModalOpen, setUfModalOpen] = useState(false);
+  const [ufCache, setUfCache] = useState({});
+  const [ufCalcDate, setUfCalcDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [ufCalcRate, setUfCalcRate] = useState(null);
+  const [ufCalcUF, setUfCalcUF] = useState("");
+  const [ufCalcCLP, setUfCalcCLP] = useState("");
 
-  /* Contracts realtime */
-  const [allContracts,setAllContracts]=useState({});
+  /* Totales / Faltantes / Mensajes / Reajustes */
+  const [showTotalsModal, setShowTotalsModal] = useState(false);
+  const [showMissingModal, setShowMissingModal] = useState(false);
+  const [messagesOpen, setMessagesOpen] = useState(false);
+  const [messagesUnread, setMessagesUnread] = useState(false);
+  const [showReajustesModal, setShowReajustesModal] = useState(false);
 
-  /* UF */
-  const [ufToday,setUfToday]=useState(null); const [ufPast,setUfPast]=useState([]); const [ufFuture,setUfFuture]=useState([]);
-  const [ufModalOpen,setUfModalOpen]=useState(false);
-
-  /* Totales/Faltantes */
-  const [showTotalsModal,setShowTotalsModal]=useState(false);
-  const [showMissingModal,setShowMissingModal]=useState(false);
-
-  /* Mensajes */
-  const [messagesOpen,setMessagesOpen]=useState(false); const [messagesUnread,setMessagesUnread]=useState(false);
-
-  /* Reajustes */
-  const [reajustesOpen,setReajustesOpen]=useState(false);
-
-  /* Toast */
-  const [toast,setToast]=useState({show:false,message:"",type:"info"});
-
-  /* Suma seleccionada */
-  const [sumDropdownOpen,setSumDropdownOpen]=useState(false);
-  const [sumSelectedOwners,setSumSelectedOwners]=useState([]);
-
-  /* Menú */
-  const [menuOpen,setMenuOpen]=useState(false);
-  const menuBtnRef=useRef(null), menuAnchorRef=useRef(null);
-
-  /* Header selects */
-  const [headerMonthOpen,setHeaderMonthOpen]=useState(false);
-  const [headerYearOpen,setHeaderYearOpen]=useState(false);
-
-  /* Etiquetas */
-  const { year, monthName } = monthIdToParts(selectedMonthId);
-  const activeMonthLabel = useMemo(()=>{
-    const f=monthList.find(m=>m.id===selectedMonthId);
-    return (f?f.label:`${monthName} ${year}`).toUpperCase();
-  },[monthList,selectedMonthId,monthName,year]);
-
-  /* Fail-safe de carga */
-  useEffect(()=>{ const t=setTimeout(()=>setLoading(false),2200); return ()=>clearTimeout(t); },[]);
-
-  /* Click afuera (blindado) */
-  useEffect(()=>{
-    const outside=(e)=>{
-      const t=e?.target;
-      const btn=menuBtnRef.current, anc=menuAnchorRef.current;
-      const inBtn = btn && typeof btn.contains==="function" && btn.contains(t);
-      const inAnc = anc && typeof anc.contains==="function" && anc.contains(t);
-      if(!inBtn && !inAnc) setMenuOpen(false);
-      const inHeader = t && t.closest && t.closest(".header-controls");
-      if(!inHeader){ setHeaderMonthOpen(false); setHeaderYearOpen(false); }
-    };
-    document.addEventListener("mousedown",outside,{passive:true});
-    return ()=>document.removeEventListener("mousedown",outside);
-  },[]);
-
-  /* Meta + estructura */
-  useEffect(()=>{
-    (async()=>{
-      try{
-        const metaSnap=await getDoc(doc(db,"meta","app"));
-        if(metaSnap.exists()){ const m=metaSnap.data(); if(m.appTitle) setAppTitle(m.appTitle); }
-      }catch(err){ setError("No se pudo leer meta/app."); setErrorDetail(`${err.code||""} ${err.message||""}`); }
-      try{
-        const structSnap=await getDoc(doc(db,"structure","owners"));
-        if(structSnap.exists()){
-          const st=structSnap.data();
-          if(Array.isArray(st.owners)){ setOwners(st.owners); setSumSelectedOwners(st.owners.map(o=>o.name)); }
-        }else{
-          setSumSelectedOwners(FALLBACK_OWNERS.map(o=>o.name));
-        }
-      }catch{ setSumSelectedOwners(FALLBACK_OWNERS.map(o=>o.name)); }
-    })();
-  },[]);
-
-  /* Contracts realtime */
-  useEffect(()=>{
-    const unsub=onSnapshot(collection(db,"contracts"),
-      (snap)=>{ const map={}; snap.forEach(d=>{map[d.id]=d.data();}); setAllContracts(map); },
-      (err)=>{ setError("No se pudo suscribir a contracts."); setErrorDetail(`${err.code||""} ${err.message||""}`); }
-    );
-    return ()=>unsub();
-  },[]);
-
-  /* Mensajes unread */
-  useEffect(()=>{
-    if(!role) return;
-    const unsub=onSnapshot(doc(db,"meta","messages"),(snap)=>{
-      const d=snap.data();
-      if(!d){ setMessagesUnread(false); return; }
-      if(role==="admin") setMessagesUnread(!!d.unreadForAdmin);
-      if(role==="viewer") setMessagesUnread(!!d.unreadForViewer);
-    });
-    return ()=>unsub();
-  },[role]);
-  const markMessagesSeen=async()=>{
-    if(!role) return;
-    try{
-      const payload = role==="admin" ? { unreadForAdmin:false, lastSeenAdmin:serverTimestamp() }
-                                     : { unreadForViewer:false, lastSeenViewer:serverTimestamp() };
-      await setDoc(doc(db,"meta","messages"), payload, { merge:true });
-    }catch(err){ setToast({show:true,message:`No se pudo actualizar mensajes: ${err.message||""}`,type:"error"}); }
+  /* ===== Toasters ===== */
+  const showToast = (m, t = "info") => {
+    setToast({ show: true, message: m, type: t });
+    setTimeout(() => setToast((s) => ({ ...s, show: false })), 3200);
   };
 
-  /* UF */
-  useEffect(()=>{
-    (async()=>{
-      try{
-        const res=await fetch("https://mindicador.cl/api/uf");
-        const json=await res.json();
-        const serie=Array.isArray(json.serie)?json.serie:[];
-        if(serie.length){
-          const todayVal=serie[0].valor;
+  /* ===== Meta & estructura ===== */
+  useEffect(() => {
+    (async () => {
+      try {
+        const metaSnap = await getDoc(doc(db, "meta", "app"));
+        if (metaSnap.exists()) {
+          const m = metaSnap.data();
+          if (m.appTitle) setAppTitle(String(m.appTitle));
+        }
+      } catch {}
+      try {
+        const structSnap = await getDoc(doc(db, "structure", "owners"));
+        if (structSnap.exists()) {
+          const st = structSnap.data();
+          if (Array.isArray(st.owners)) setOwners(st.owners);
+          else setOwners(FALLBACK_OWNERS);
+        } else {
+          setOwners(FALLBACK_OWNERS);
+        }
+      } catch {
+        setOwners(FALLBACK_OWNERS);
+      }
+    })();
+  }, []);
+
+  /* ===== Contracts realtime ===== */
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "contracts"), (snap) => {
+      const map = {};
+      snap.forEach((d) => {
+        map[d.id] = { ...(d.data() || {}) };
+      });
+      setAllContracts(map);
+    });
+    return () => unsub();
+  }, []);
+
+  /* ===== UF base ===== */
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("https://mindicador.cl/api/uf");
+        const json = await res.json();
+        const serie = Array.isArray(json.serie) ? json.serie : [];
+        if (serie.length) {
+          const todayVal = serie[0].valor;
           setUfToday(todayVal);
-          setUfPast(serie.slice(0,15));
-          setUfFuture(generateNext15Days(serie[0].fecha,todayVal));
+          setUfPast(serie.slice(0, 15));
+          const next = [];
+          const base = new Date(serie[0].fecha);
+          for (let i = 1; i <= 15; i++) {
+            const d = new Date(base);
+            d.setDate(d.getDate() + i);
+            next.push({ fecha: d.toISOString(), valor: todayVal, estimado: true });
+          }
+          setUfFuture(next);
+          const cache = {};
+          serie.forEach((it) => {
+            const iso = new Date(it.fecha).toISOString().slice(0, 10);
+            cache[iso] = it.valor;
+          });
+          setUfCache((prev) => ({ ...prev, ...cache }));
+          const todayIso = new Date().toISOString().slice(0, 10);
+          setUfCalcDate(todayIso);
+          setUfCalcRate(cache[todayIso] ?? todayVal);
         }
-      }catch{}
+      } catch {}
     })();
-  },[]);
+  }, []);
 
-  /* Carga mensual */
-  useEffect(()=>{
-    if(viewMode!=="MONTH") return;
-    (async()=>{
-      setLoading(true); setError(""); setErrorDetail("");
-      try{
-        const cur=await getDoc(doc(db,"rents",selectedMonthId));
-        setDataCurrent(cur.exists()?cur.data():{});
-        const prev=await getDoc(doc(db,"rents",getPrevMonthId(selectedMonthId)));
-        setDataPrev(prev.exists()?prev.data():{});
-      }catch(err){
-        setError("NO SE PUDIERON CARGAR LOS DATOS DE ESTE MES."); setErrorDetail(`${err.code||""} ${err.message||""}`);
-        setDataCurrent({}); setDataPrev({});
-      }finally{ setLoading(false); }
+  const getUfForDate = async (isoDate) => {
+    if (!isoDate) return null;
+    if (ufCache[isoDate] != null) return ufCache[isoDate];
+    try {
+      const year = isoDate.slice(0, 4);
+      const res = await fetch(`https://mindicador.cl/api/uf/${year}`);
+      const json = await res.json();
+      const arr = Array.isArray(json.serie) ? json.serie : [];
+      const map = {};
+      arr.forEach((it) => {
+        const iso = new Date(it.fecha).toISOString().slice(0, 10);
+        map[iso] = it.valor;
+      });
+      setUfCache((prev) => ({ ...prev, ...map }));
+      return map[isoDate] ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  /* ===== Lectura mensual ===== */
+  useEffect(() => {
+    if (viewMode !== "MONTH") return;
+    (async () => {
+      setLoading(true);
+      try {
+        const cur = await getDoc(doc(db, "rents", selectedMonthId));
+        const curData = cur.exists() ? cur.data() : {};
+        const prev = await getDoc(doc(db, "rents", getPrevMonthId(selectedMonthId)));
+        const prevData = prev.exists() ? prev.data() : {};
+        setDataCurrent(curData);
+        setDataPrev(prevData);
+      } catch {
+        setDataCurrent({});
+        setDataPrev({});
+      } finally {
+        setLoading(false);
+      }
     })();
-  },[selectedMonthId,viewMode]);
+  }, [selectedMonthId, viewMode]);
 
-  /* Carga anual */
-  useEffect(()=>{
-    if(viewMode!=="YEAR") return;
-    (async()=>{
-      setLoading(true); setError(""); setErrorDetail("");
-      try{
-        const yearDocs={};
-        for(let m=1;m<=12;m++){
-          const mId = `${selectedYear}-${String(m).padStart(2,"0")}`;
-          const snap=await getDoc(doc(db,"rents",mId));
-          if(snap.exists()) yearDocs[mId]=snap.data();
+  /* ===== Lectura anual ===== */
+  useEffect(() => {
+    if (viewMode !== "YEAR") return;
+    (async () => {
+      setLoading(true);
+      try {
+        const yearDocs = {};
+        for (let m = 1; m <= 12; m++) {
+          const mId = `${selectedYear}-${String(m).padStart(2, "0")}`;
+          const snap = await getDoc(doc(db, "rents", mId));
+          if (snap.exists()) yearDocs[mId] = snap.data();
         }
-        const aggregate={};
-        (owners||[]).forEach(o=>{ aggregate[o.name]={}; (o.properties||[]).forEach(p=>aggregate[o.name][p]=0); });
-        Object.values(yearDocs).forEach(monthData=>{
-          (owners||[]).forEach(o=>{
-            const od=monthData[o.name]||{};
-            (o.properties||[]).forEach(p=>{ const v=od[p]; if(v) aggregate[o.name][p]+=Number(v); });
+        const aggregate = {};
+        (owners || []).forEach((o) => {
+          aggregate[o.name] = {};
+          (o.properties || []).forEach((p) => (aggregate[o.name][p] = 0));
+        });
+        Object.values(yearDocs).forEach((monthData) => {
+          (owners || []).forEach((o) => {
+            const ok = pickKeyCI(monthData, o.name);
+            const od = ok ? monthData[ok] : {};
+            (o.properties || []).forEach((p) => {
+              const pk = pickKeyCI(od, p);
+              const v = pk ? od[pk] : 0;
+              if (v) aggregate[o.name][p] += Number(v);
+            });
           });
         });
         setDataAnnual(aggregate);
-      }catch(err){
-        setError("NO SE PUDO CARGAR LA VISTA ANUAL."); setErrorDetail(`${err.code||""} ${err.message||""}`);
+      } catch {
         setDataAnnual({});
-      }finally{ setLoading(false); }
+      } finally {
+        setLoading(false);
+      }
     })();
-  },[viewMode,selectedYear,owners]);
+  }, [viewMode, selectedYear, owners]);
 
-  /* Toast helper */
-  const showToast=(msg,type="info")=>{ setToast({show:true,message:msg,type}); setTimeout(()=>setToast(s=>({...s,show:false})),3500); };
+  /* ===== Totales ===== */
+  const totalGeneralMonth = useMemo(
+    () =>
+      (owners || []).reduce((acc, o) => {
+        const ok = pickKeyCI(dataCurrent, o.name);
+        const od = ok ? dataCurrent[ok] : {};
+        return acc + (o.properties || []).reduce((s, p) => {
+          const pk = pickKeyCI(od, p);
+          return s + (pk ? Number(od[pk] || 0) : 0);
+        }, 0);
+      }, 0),
+    [owners, dataCurrent]
+  );
 
-  /* Totales */
-  const totalGeneralMonth = useMemo(()=> (owners||[]).reduce((acc,o)=>{
-    const od=dataCurrent[o.name]||{}; return acc + (o.properties||[]).reduce((s,p)=> s+(od[p]?Number(od[p]):0),0);
-  },0),[owners,dataCurrent]);
-  const totalSelectedMonth = useMemo(()=> (owners||[]).reduce((acc,o)=>{
-    if(!sumSelectedOwners.includes(o.name)) return acc;
-    const od=dataCurrent[o.name]||{}; return acc + (o.properties||[]).reduce((s,p)=> s+(od[p]?Number(od[p]):0),0);
-  },0),[owners,dataCurrent,sumSelectedOwners]);
-  const totalGeneralYear = useMemo(()=> (owners||[]).reduce((acc,o)=>{
-    const od=dataAnnual[o.name]||{}; return acc + (o.properties||[]).reduce((s,p)=> s+(od[p]?Number(od[p]):0),0);
-  },0),[owners,dataAnnual]);
-  const totalSelectedYear = useMemo(()=> (owners||[]).reduce((acc,o)=>{
-    if(!sumSelectedOwners.includes(o.name)) return acc;
-    const od=dataAnnual[o.name]||{}; return acc + (o.properties||[]).reduce((s,p)=> s+(od[p]?Number(od[p]):0),0);
-  },0),[owners,dataAnnual,sumSelectedOwners]);
+  const totalGeneralYear = useMemo(
+    () =>
+      (owners || []).reduce((acc, o) => {
+        const od = dataAnnual[o.name] || {};
+        return acc + (o.properties || []).reduce((s, p) => s + Number(od[p] || 0), 0);
+      }, 0),
+    [owners, dataAnnual]
+  );
 
-  /* Faltantes y avisos próximos */
-  const { missingContractsCount, missingContractsList, renewalSoon } = useMemo(()=>{
-    const today=new Date(), threshold=new Date(today.getTime()); threshold.setMonth(threshold.getMonth()+3);
-    let missing=0; const list=[]; const soon=[];
-    (owners||[]).forEach(o=>{
-      (o.properties||[]).forEach(p=>{
-        const c=findContractData(o.name,p,allContracts);
-        if(!c){ missing++; list.push({owner:o.name,property:p}); }
-        else{
-          const venc=parseFlexibleDate(c.fechaTermino);
-          if(venc){ const overdue=venc<new Date(); if(overdue||venc<=threshold) soon.push({owner:o.name,property:p,fechaTermino:c.fechaTermino||null}); }
-        }
-      });
-    });
-    return { missingContractsCount:missing, missingContractsList:list, renewalSoon:soon };
-  },[allContracts,owners]);
-
-  /* Reajustes del mes (no usado acá pero lo dejas si ya tienes modal) */
-  const abbr = abbrFromMonthId(selectedMonthId);
-
-  /* Handlers de edición en grilla */
-  const handleChangeProperty=(ownerName,propertyName,newValue)=>{
-    setDataCurrent(prev=>{ const od=prev?.[ownerName]||{}; return {...prev,[ownerName]:{...od,[propertyName]:newValue===""?"":Number(newValue)}}; });
-  };
-  const handleChangePropertyObs=(ownerName,propertyName,newObs)=>{
-    const obsKey=`${propertyName}__obs`;
-    setDataCurrent(prev=>{ const od=prev?.[ownerName]||{}; return {...prev,[ownerName]:{...od,[obsKey]:newObs}}; });
-  };
-  const handleChangeOwnerName=(oldName,newName)=>{
-    if(!newName.trim()) return;
-    setOwners(prev=>(prev||[]).map(o=>o.name===oldName?{...o,name:newName}:o));
-    setDataCurrent(prev=>{ if(prev?.[oldName]===undefined) return prev; const {[oldName]:oldData,...rest}=prev; return {...rest,[newName]:oldData}; });
-    setDataPrev(prev=>{ if(prev?.[oldName]===undefined) return prev; const {[oldName]:oldData,...rest}=prev; return {...rest,[newName]:oldData}; });
-    setSumSelectedOwners(prev=>prev.map(n=>n===oldName?newName:n));
-  };
-  const handleChangePropertyName=(ownerName,oldProp,newProp)=>{
-    if(!newProp.trim()) return;
-    setOwners(prev=>(prev||[]).map(o=>{
-      if(o.name!==ownerName) return o;
-      return {...o,properties:(o.properties||[]).map(p=>p===oldProp?newProp:p)};
-    }));
-    setDataCurrent(prev=>{
-      const od=prev?.[ownerName]||{}; const nd={};
-      Object.entries(od).forEach(([k,v])=>{
-        if(k===oldProp) nd[newProp]=v; else if(k===`${oldProp}__obs`) nd[`${newProp}__obs`]=v; else nd[k]=v;
-      });
-      return {...prev,[ownerName]:nd};
-    });
-    setDataPrev(prev=>{
-      const od=prev?.[ownerName]||{}; const nd={};
-      Object.entries(od).forEach(([k,v])=>{ nd[k===oldProp?newProp:k]=v; });
-      return {...prev,[ownerName]:nd};
-    });
-  };
-  const handleAddProperty=(ownerName)=>{
-    setOwners(prev=>(prev||[]).map(o=>{
-      if(o.name!==ownerName) return o;
-      const props=o.properties||[]; return {...o,properties:[...props,`Propiedad ${props.length+1}`]};
-    }));
-  };
-  const handleDeleteProperty=async(ownerName,propName)=>{
-    const ok=window.confirm(`¿Eliminar "${propName}" de "${ownerName}"?`); if(!ok) return;
-    setOwners(prev=>(prev||[]).map(o=>{
-      if(o.name!==ownerName) return o;
-      return {...o,properties:(o.properties||[]).filter(p=>p!==propName)};
-    }));
-    setDataCurrent(prev=>{
-      const od=prev?.[ownerName]; if(!od) return prev;
-      const {[propName]:_,[`${propName}__obs`]:__,...rest}=od; return {...prev,[ownerName]:rest};
-    });
-    setDataPrev(prev=>{
-      const od=prev?.[ownerName]; if(!od) return prev;
-      const {[propName]:_,...rest}=od; return {...prev,[ownerName]:rest};
-    });
+  /* ===== Resolver contrato robusto ===== */
+  const resolveContract = (ownerName, propertyName) => {
+    if (!ownerName || !propertyName) return null;
+    const idCanon = canonicalDocId(ownerName, propertyName);
+    const idNat = `${ownerName}__${propertyName}`;
+    if (allContracts[idCanon]) return allContracts[idCanon];
+    if (allContracts[idNat]) return allContracts[idNat];
+    const eq = (a, b) => norm(a) === norm(b);
+    const hit = Object.values(allContracts || {}).find(
+      (c) => c && eq(c.owner, ownerName) && eq(c.property, propertyName)
+    );
+    return hit || null;
   };
 
-  /* === GUARDAR === */
-  const handleSave=async()=>{
-    if(role!=="admin"){ showToast("SOLO LECTURA. Entra como admin para guardar.","error"); return; }
-    setSaving(true);
-    try{
-      await setDoc(doc(db,"rents",selectedMonthId),(dataCurrent||{}),{merge:true});
-      await setDoc(doc(db,"structure","owners"),{owners:owners||[]},{merge:true});
-      await setDoc(doc(db,"meta","app"),{appTitle:appTitle||"INFORME MENSUAL DE ARRIENDOS"},{merge:true});
-      const snap=await getDoc(doc(db,"rents",selectedMonthId));
-      setDataCurrent(snap.exists()?snap.data():{});
-      showToast("CAMBIOS GUARDADOS","success"); setEditing(false);
-    }catch(e){ console.error(e); showToast(`NO SE PUDO GUARDAR: ${e?.code||""} ${e?.message||""}`,"error"); }
-    finally{ setSaving(false); }
-  };
-
-  /* === ABRIR HISTORIAL (FALTABA ESTA FUNCIÓN) === */
-  const handleOpenHistory = async (ownerName, propertyName)=>{
-    try{
+  /* ===== Abrir historial ===== */
+  const handleOpenHistory = async (ownerName, propertyName) => {
+    try {
       setHistoryOwner(ownerName);
       setHistoryProperty(propertyName);
       setHistoryOpen(true);
       setHistoryLoading(true);
 
-      // últimos 6 meses desde el mes actualmente seleccionado
-      const ids=[]; let id=selectedMonthId;
-      for(let i=0;i<6;i++){ ids.push(id); id=getPrevMonthId(id); }
-      ids.reverse(); // de más antiguo -> más reciente (queda lindo con el gráfico)
+      // últimos 6 meses desde el seleccionado
+      const ids = [];
+      let id = selectedMonthId;
+      for (let i = 0; i < 6; i++) {
+        ids.push(id);
+        id = getPrevMonthId(id);
+      }
+      ids.reverse();
 
-      const rows=[];
-      for(const mid of ids){
-        const snap=await getDoc(doc(db,"rents",mid));
-        const monthData = snap.exists()? snap.data() : {};
-        const val = Number((monthData?.[ownerName]?.[propertyName]) || 0);
-        const { year:yy, monthName:mname } = monthIdToParts(mid);
-        rows.push({ monthId: mid, monthLabel: `${mname} ${yy}`, value: val });
+      const rows = [];
+      for (const mid of ids) {
+        const snap = await getDoc(doc(db, "rents", mid));
+        const monthData = snap.exists() ? snap.data() : {};
+        const ok = pickKeyCI(monthData, ownerName);
+        const od = ok ? monthData[ok] : {};
+        const pk = pickKeyCI(od, propertyName);
+        const val = pk ? Number(od[pk] || 0) : 0;
+        const { year: yy, monthName: mname } = monthIdToParts(mid);
+        rows.push({ monthId: mid, monthLabel: `${mname.toUpperCase()} ${yy}`, value: val });
       }
       setHistoryData(rows);
 
       // contrato
-      const c=findContractData(ownerName,propertyName,allContracts);
-      setContractData(c||null);
-    }catch(e){
-      console.error("handleOpenHistory:",e);
-      setHistoryData([]); setContractData(null);
-      showToast("No se pudo cargar el historial.","error");
-    }finally{
+      setContractData(resolveContract(ownerName, propertyName));
+    } catch {
+      setHistoryData([]);
+      setContractData(null);
+      setToast("NO SE PUDO CARGAR EL HISTORIAL.", "error");
+    } finally {
       setHistoryLoading(false);
     }
   };
 
-  /* Filtros y búsqueda */
-  const filteredOwners = useMemo(()=>{
-    const term=searchTerm.trim().toLowerCase();
-    return (owners||[]).filter(o=>{
-      if(ownerFilter!=="ALL" && o.name!==ownerFilter) return false;
-      if(!term) return true;
-      if((o.name||"").toLowerCase().includes(term)) return true;
-      return (o.properties||[]).some(p=>(p||"").toLowerCase().includes(term));
+  /* ===== Mensajes: unread flag ===== */
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "meta", "messages"), (snap) => {
+      const d = snap.data();
+      if (!d) return setMessagesUnread(false);
+      if (role === "admin") setMessagesUnread(!!d.unreadForAdmin);
+      if (role === "viewer") setMessagesUnread(!!d.unreadForViewer);
     });
-  },[ownerFilter,searchTerm,owners]);
+    return () => unsub();
+  }, [role]);
 
-  /* Login */
-  const handleLogin=(e)=>{
+  const computedHeaderTitle = viewMode === "YEAR" ? "INFORME ANUAL DE ARRIENDOS" : appTitle;
+  const modalResetKey = `${historyOwner}__${historyProperty}__${historyOpen ? 1 : 0}`;
+
+  /* ===== Pantalla Login ===== */
+  const handleLogin = (e) => {
     e.preventDefault();
-    if(loginUser==="user" && loginPass==="123"){ setRole("viewer"); setLoginError(""); }
-    else if(loginUser==="admin" && loginPass==="123"){ setRole("admin"); setLoginError(""); }
-    else setLoginError("Usuario o contraseña incorrectos");
+    const u = (loginUser || "").toLowerCase().trim();
+    const p = (loginPass || "").trim();
+    if (u === "user" && p === "123") {
+      setRole("viewer"); setLoginError("");
+    } else if (u === "admin" && p === "123") {
+      setRole("admin"); setLoginError("");
+    } else {
+      setLoginError("USUARIO O CONTRASEÑA INCORRECTOS");
+    }
   };
 
-  const computedHeaderTitle = viewMode==="YEAR" ? "INFORME ANUAL DE ARRIENDOS" : appTitle;
-
-  /* Pantalla login */
-  if(!role){
+  if (!role) {
     return (
-      <div className="login-shell">
-        <form className="login-card" onSubmit={handleLogin}>
-          <h1>CONTROL DE ARRIENDOS</h1>
-          <label>USUARIO
-            <input value={loginUser} onChange={(e)=>setLoginUser(e.target.value)} autoComplete="username"/>
-          </label>
-          <label>CONTRASEÑA
-            <input type="password" value={loginPass} onChange={(e)=>setLoginPass(e.target.value)} autoComplete="current-password"/>
-          </label>
-          <button type="submit" className="btn btn-primary login-btn">ENTRAR</button>
-          {loginError && <div className="login-error">{loginError}</div>}
-          <div className="login-hint">user / 123 = solo lectura<br/>admin / 123 = puede editar</div>
-        </form>
+      <div className="app-shell dark">
+        <div className="login-shell">
+          <form className="login-card" onSubmit={handleLogin}>
+            <h1>CONTROL DE ARRIENDOS</h1>
+            <label>USUARIO
+              <input value={loginUser} onChange={(e) => setLoginUser(e.target.value)} autoComplete="username" />
+            </label>
+            <label>CONTRASEÑA
+              <input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} autoComplete="current-password" />
+            </label>
+            <button type="submit" className="btn btn-primary login-btn">ENTRAR</button>
+            {loginError && <div className="login-error">{loginError}</div>}
+            <div className="login-hint">USER / 123 = SOLO LECTURA · ADMIN / 123 = PUEDE EDITAR</div>
+          </form>
+        </div>
       </div>
     );
   }
 
-  const modalResetKey = `${historyOwner}__${historyProperty}__${historyOpen?1:0}`;
-
+  /* ===== UI ===== */
   return (
-    <div className={darkMode ? "app-shell dark" : "app-shell"}>
-      {(loading||saving) && (
+    <div className="app-shell dark">
+      {(loading || saving) && (
         <div className="loading-overlay">
           <div className="loader-hourglass">⌛</div>
           <div className="loader-text">{saving ? "GUARDANDO…" : "CARGANDO DATOS..."}</div>
@@ -460,325 +419,580 @@ function AppCore(){
       )}
 
       <div className="page-container">
-        {/* Header */}
+        {/* HEADER */}
         <header className="header header-grid">
           <div className="header-line">
-            {role==="admin" && editing ? (
-              <input className="app-title-input" value={appTitle} onChange={(e)=>setAppTitle(e.target.value)}/>
+            {role === "admin" && editing ? (
+              <input className="app-title-input" value={appTitle} onChange={(e) => setAppTitle(e.target.value)} />
             ) : (
               <div className="header-title">{computedHeaderTitle}</div>
             )}
-            <span className="badge-month">{viewMode==="MONTH" ? `${monthName} ${year}` : `AÑO ${selectedYear}`}</span>
-            {role==="viewer" && <span className="readonly-pill">SOLO LECTURA</span>}
           </div>
 
-          <div className="header-menu-wrapper" ref={menuAnchorRef}>
-            <button className={messagesUnread?"btn menu-button with-dot":"btn menu-button"} onClick={()=>setMenuOpen(o=>!o)} ref={menuBtnRef}>☰ MENÚ</button>
-
-            {/* Controles fijos del header */}
-            <div className="header-controls">
-              {viewMode==="MONTH" ? (
-                <div className="hc-group">
-                  <button className="btn btn-secondary hc-trigger" onClick={()=>{ setHeaderMonthOpen(v=>!v); setHeaderYearOpen(false); }}>
-                    {activeMonthLabel} ▾
-                  </button>
-                  {headerMonthOpen && (
-                    <div className="hc-dropdown">
-                      {monthList.map(m=>(
-                        <button key={m.id} className={m.id===selectedMonthId?"hc-item active":"hc-item"} onClick={()=>{ setSelectedMonthId(m.id); setHeaderMonthOpen(false); }}>
-                          {m.label.toUpperCase()}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="hc-group">
-                  <button className="btn btn-secondary hc-trigger" onClick={()=>{ setHeaderYearOpen(v=>!v); setHeaderMonthOpen(false); }}>
-                    {String(selectedYear)} ▾
-                  </button>
-                  {headerYearOpen && (
-                    <div className="hc-dropdown">
-                      {yearList.map(y=>(
-                        <button key={y} className={y===selectedYear?"hc-item active":"hc-item"} onClick={()=>{ setSelectedYear(y); setHeaderYearOpen(false); }}>
-                          {String(y)}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+          {/* SELECTOR DE MES + UF */}
+          <div className="header-controls" style={{ position: "relative" }}>
+            <div className="hc-group">
+              <button
+                className="btn btn-secondary hc-trigger"
+                onClick={() => setHeaderMonthOpen((v) => !v)}
+              >
+                {activeMonthLabel} ▾
+              </button>
+              {headerMonthOpen && (
+                <div className="hc-dropdown" style={{ zIndex: 60 }}>
+                  {monthList.map((m) => (
+                    <button
+                      key={m.id}
+                      className={m.id === selectedMonthId ? "hc-item active" : "hc-item"}
+                      onClick={() => {
+                        setSelectedMonthId(m.id);
+                        setHeaderMonthOpen(false);
+                      }}
+                    >
+                      {m.label.toUpperCase()}
+                    </button>
+                  ))}
                 </div>
               )}
-
-              <button className="btn btn-secondary" onClick={()=>setDarkMode(d=>!d)}>{darkMode?"☀ CLARO":"☾ OSCURO"}</button>
-              <button className="btn btn-secondary" onClick={()=>setUfModalOpen(true)}>
-                VALOR UF: {ufToday? ufToday.toLocaleString("es-CL",{style:"currency",currency:"CLP"}) : "$---"}
-              </button>
             </div>
 
-            {menuOpen && (
-              <div className="menu-dropdown">
-                <div className="menu-section-title">VISTA</div>
-                <button className="menu-item" onClick={()=>{
-                  if(viewMode==="MONTH"){ setViewMode("YEAR"); setSelectedYear(Number(selectedMonthId.slice(0,4))||today.getFullYear()); }
-                  else { setViewMode("MONTH"); }
-                  setMenuOpen(false);
-                }}>
-                  {viewMode==="MONTH" ? "INFO ANUAL" : "VOLVER A MENSUAL"}
-                </button>
+            <button className="btn btn-secondary" onClick={() => setUfModalOpen(true)}>
+              VALOR UF: {ufToday != null ? moneyCLP2(ufToday) : "$---,--"}
+            </button>
+          </div>
 
-                <div className="menu-section-title">ACCIONES</div>
-                <button className="menu-item" onClick={()=>{
-                  const title=viewMode==="MONTH"?`ARRIENDOS ${activeMonthLabel}`:`ARRIENDOS AÑO ${selectedYear}`;
-                  let html=`<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:x='urn:schemas-microsoft-com:office:excel' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='UTF-8' /><title>${title}</title><style>table{border-collapse:collapse}th,td{border:1px solid #777;padding:4px 6px}th{background:#0f172a;color:#fff}.num{mso-number-format:"\\$ #,##0";text-align:right}</style></head><body><h2>${title}</h2><table><tr><th>PROPIEDAD</th><th>PROPIETARIO</th><th>MONTO</th></tr>`;
-                  const src=viewMode==="MONTH"
-                    ? (owners||[]).flatMap(o=>(o.properties||[]).map(p=>({prop:p,owner:o.name,val:(dataCurrent[o.name]||{})[p]?Number((dataCurrent[o.name]||{})[p]):0})))
-                    : (owners||[]).flatMap(o=>(o.properties||[]).map(p=>({prop:p,owner:o.name,val:(dataAnnual[o.name]||{})[p]?Number((dataAnnual[o.name]||{})[p]):0})));
-                  src.forEach(r=>{ html+=`<tr><td>${r.prop}</td><td>${r.owner}</td><td class="num">${r.val}</td></tr>`; });
-                  html+=`</table></body></html>`;
-                  const blob=new Blob([html],{type:"application/vnd.ms-excel"}); const url=URL.createObjectURL(blob); const a=document.createElement("a");
-                  a.href=url; a.download=viewMode==="MONTH"?`arriendos-${selectedMonthId}.xls`:`arriendos-${selectedYear}.xls`; a.click(); URL.revokeObjectURL(url);
-                  setMenuOpen(false);
-                }}>Exportar Excel</button>
+          {/* ACCIONES */}
+          <div className="actions-bar">
+            <button
+              className="btn"
+              onClick={() => {
+                if (viewMode === "MONTH") {
+                  setViewMode("YEAR");
+                  setHeaderMonthOpen(false);
+                } else {
+                  setViewMode("MONTH");
+                }
+              }}
+            >
+              {viewMode === "MONTH" ? "INFO ANUAL" : "VOLVER A MENSUAL"}
+            </button>
 
-                <button className="menu-item" onClick={()=>{ if(role==="viewer"){ setMenuOpen(false); return; } setEditing(e=>!e); setMenuOpen(false); }}>
-                  {editing?"Salir edición":"Entrar edición"}
-                </button>
+            <button
+              className="btn"
+              onClick={() => {
+                const title =
+                  viewMode === "MONTH"
+                    ? `ARRIENDOS ${activeMonthLabel}`
+                    : `ARRIENDOS AÑO ${selectedYear}`;
+                let html = `
+                  <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+                  <head><meta charset="UTF-8" /><title>${title}</title>
+                  <style>table{border-collapse:collapse}th,td{border:1px solid #777;padding:4px 6px}th{background:#0f172a;color:#fff}.num{mso-number-format:"\\$ #,##0";text-align:right}</style>
+                  </head><body><h2>${title}</h2><table><tr><th>PROPIEDAD</th><th>PROPIETARIO</th><th>MONTO</th></tr>`;
+                const source =
+                  viewMode === "MONTH"
+                    ? (owners || []).flatMap((o) => {
+                        const ok = pickKeyCI(dataCurrent, o.name);
+                        const od = ok ? dataCurrent[ok] : {};
+                        return (o.properties || []).map((p) => {
+                          const pk = pickKeyCI(od, p);
+                          const val = pk ? Number(od[pk] || 0) : 0;
+                          return { prop: p, owner: o.name, val };
+                        });
+                      })
+                    : (owners || []).flatMap((o) =>
+                        (o.properties || []).map((p) => ({
+                          prop: p,
+                          owner: o.name,
+                          val: (dataAnnual[o.name] || {})[p]
+                            ? Number((dataAnnual[o.name] || {})[p])
+                            : 0,
+                        }))
+                      );
+                source.forEach((r) => {
+                  html += `<tr><td>${r.prop}</td><td>${r.owner}</td><td class="num">${r.val}</td></tr>`;
+                });
+                html += `</table></body></html>`;
+                const blob = new Blob([html], { type: "application/vnd.ms-excel" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download =
+                  viewMode === "MONTH"
+                    ? `arriendos-${selectedMonthId}.xls`
+                    : `arriendos-${selectedYear}.xls`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              EXPORTAR EXCEL
+            </button>
 
-                {role==="admin" && editing && (
-                  <button className="menu-item strong" disabled={saving} onClick={()=>{ handleSave(); setMenuOpen(false); }}>
-                    {saving?"GUARDANDO…":"Guardar cambios"}
-                  </button>
-                )}
+            <button
+              className="btn"
+              onClick={() => {
+                if (role === "viewer") {
+                  setToast("SOLO LECTURA", "error");
+                  return;
+                }
+                setEditing((e) => !e);
+              }}
+            >
+              {editing ? "SALIR EDICION" : "ENTRAR EDICION"}
+            </button>
 
-                <button className="menu-item" onClick={async()=>{ setMessagesOpen(true); await markMessagesSeen(); setMenuOpen(false); }}>
-                  Mensajes {messagesUnread?"•":""}
-                </button>
-
-                <button className="menu-item" onClick={()=>{ setShowTotalsModal(true); setMenuOpen(false); }}>
-                  Totales por empresa
-                </button>
-
-                <button className="menu-item" onClick={()=>{ setShowMissingModal(true); setMenuOpen(false); }}>
-                  Contratos faltantes: {missingContractsCount}
-                </button>
-
-                <div className="menu-section-title">OTROS</div>
-                <button className="menu-item" onClick={()=>{ setReajustesOpen(true); setMenuOpen(false); }}>
-                  Reajustes del mes
-                </button>
-
-                <button className="menu-item" onClick={()=>{ setRole(null); setEditing(false); setMenuOpen(false); }}>
-                  Salir
-                </button>
-              </div>
+            {role === "admin" && editing && (
+              <button
+                className="btn strong"
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    await setDoc(doc(db, "rents", selectedMonthId), dataCurrent || {}, { merge: true });
+                    await setDoc(doc(db, "structure", "owners"), { owners: owners || [] }, { merge: true });
+                    await setDoc(doc(db, "meta", "app"), { appTitle: appTitle || "INFORME MENSUAL DE ARRIENDOS" }, { merge: true });
+                    setToast("CAMBIOS GUARDADOS", "success");
+                    setEditing(false);
+                  } catch (e) {
+                    setToast(`NO SE PUDO GUARDAR: ${e?.message || ""}`, "error");
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+              >
+                {saving ? "GUARDANDO…" : "GUARDAR CAMBIOS"}
+              </button>
             )}
+
+            <button className={messagesUnread ? "btn with-dot" : "btn"} onClick={() => setMessagesOpen(true)}>
+              MENSAJES
+            </button>
+
+            <button className="btn" onClick={() => setShowTotalsModal(true)}>TOTALES POR EMPRESA</button>
+            <button className="btn" onClick={() => setShowMissingModal(true)}>CONTRATOS FALTANTES</button>
+            <button className="btn" onClick={() => setShowReajustesModal(true)}>REAJUSTES DEL MES</button>
+            <button className="btn" onClick={() => { setRole(null); setEditing(false); }}>SALIR</button>
           </div>
         </header>
 
-        {/* Body */}
-        <div className={(loading||saving)?"app-body blurred":"app-body"}>
+        {/* CUERPO */}
+        <div className={(loading || saving) ? "app-body blurred" : "app-body"}>
           {/* Filtros */}
           <div className="filters-bar">
             <div>
               <label className="filter-label">PROPIETARIO</label>
-              <select className="filter-select" value={ownerFilter} onChange={(e)=>setOwnerFilter(e.target.value)}>
+              <select
+                className="filter-select"
+                value={ownerFilter}
+                onChange={(e) => setOwnerFilter(e.target.value)}
+              >
                 <option value="ALL">TODOS</option>
-                {(owners||[]).map(o=><option key={o.name} value={o.name}>{o.name}</option>)}
+                {(owners || []).map((o) => (
+                  <option key={o.name} value={o.name}>{o.name}</option>
+                ))}
               </select>
             </div>
             <div className="filter-search">
               <label className="filter-label">BUSCAR</label>
-              <input className="filter-input" value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} placeholder="propiedad o empresa..."/>
+              <input
+                className="filter-input"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="PROPIEDAD O EMPRESA..."
+              />
             </div>
-            <div className="filter-summary">
-              <div className="sum-anchor">
-                <button className="btn btn-secondary" onClick={()=>setSumDropdownOpen(v=>!v)}>
-                  SUMA SELECCIONADA: {(viewMode==="MONTH"?totalSelectedMonth:totalSelectedYear).toLocaleString("es-CL",{style:"currency",currency:"CLP",maximumFractionDigits:0})}
-                </button>
-                {sumDropdownOpen && (
-                  <div className="sum-dropdown">
-                    <button className="sum-dropdown-all" onClick={()=>setSumSelectedOwners((owners||[]).map(o=>o.name))}>TODAS</button>
-                    {(owners||[]).map(o=>(
-                      <label key={o.name} className="sum-dropdown-item">
-                        <input type="checkbox" checked={sumSelectedOwners.includes(o.name)} onChange={()=>setSumSelectedOwners(prev=> prev.includes(o.name)? prev.filter(n=>n!==o.name):[...prev,o.name])}/>
-                        {o.name}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
 
+            <div className="filter-summary">
               <button className="btn btn-secondary">
-                TOTAL GENERAL: {(viewMode==="MONTH"?totalGeneralMonth:totalGeneralYear).toLocaleString("es-CL",{style:"currency",currency:"CLP",maximumFractionDigits:0})}
+                TOTAL GENERAL: {moneyCLP0(viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear)}
               </button>
             </div>
           </div>
 
-          {/* Avisos próximos */}
-          {renewalSoon.length>0 && (
-            <div className="alert-panel column">
-              {renewalSoon.map((it,idx)=>{
-                const venc=parseFlexibleDate(it.fechaTermino); const overdue=venc && venc<new Date();
+          {/* Grilla mensual */}
+          {viewMode === "MONTH" ? (
+            (owners || [])
+              .filter((o) => ownerFilter === "ALL" || o.name === ownerFilter)
+              .filter((o) => {
+                const t = norm(searchTerm);
+                if (!t) return true;
+                if (norm(o.name).includes(t)) return true;
+                return (o.properties || []).some((p) => norm(p).includes(t));
+              })
+              .map((owner) => {
+                const okC = pickKeyCI(dataCurrent, owner.name);
+                const okP = pickKeyCI(dataPrev, owner.name);
                 return (
-                  <div key={idx} className={overdue?"alert-item overdue clickable":"alert-item clickable"} onClick={()=>handleOpenHistory(it.owner,it.property)}>
-                    {it.owner} / {it.property} → {it.fechaTermino?`VENCE: ${it.fechaTermino}`:"PRÓXIMO"}
-                  </div>
+                  <OwnerGroup
+                    key={owner.name}
+                    ownerName={owner.name}
+                    properties={owner.properties || []}
+                    dataByOwner={okC ? dataCurrent[okC] : {}}
+                    prevDataByOwner={okP ? dataPrev[okP] : {}}
+                    editing={role === "admin" && editing}
+                    onChangeProperty={(ownerName, propertyName, newValue) => {
+                      setDataCurrent((prev) => {
+                        const ownerKey = pickKeyCI(prev, ownerName) ?? ownerName;
+                        const od = prev?.[ownerKey] || {};
+                        const propKey =
+                          Object.keys(od).find((k) => norm(k) === norm(propertyName)) ?? propertyName;
+                        return {
+                          ...prev,
+                          [ownerKey]: { ...od, [propKey]: newValue === "" ? "" : Number(newValue) },
+                        };
+                      });
+                    }}
+                    onChangePropertyObs={(ownerName, propertyName, newObs) => {
+                      setDataCurrent((prev) => {
+                        const ownerKey = pickKeyCI(prev, ownerName) ?? ownerName;
+                        const od = prev?.[ownerKey] || {};
+                        const existingObsKey =
+                          Object.keys(od).find(
+                            (k) => k.endsWith("__obs") && norm(k.replace(/__obs$/, "")) === norm(propertyName)
+                          ) || null;
+                        const propKey =
+                          Object.keys(od).find((k) => norm(k) === norm(propertyName)) ?? propertyName;
+                        const obsKey = existingObsKey || `${propKey}__obs`;
+                        return { ...prev, [ownerKey]: { ...od, [obsKey]: newObs } };
+                      });
+                    }}
+                    onChangeOwnerName={(oldName, newName) => {
+                      if (!newName.trim()) return;
+                      const NN = newName;
+                      setOwners((prev) => (prev || []).map((o) => (o.name === oldName ? { ...o, name: NN } : o)));
+                      setDataCurrent((prev) => {
+                        const oldKey = pickKeyCI(prev, oldName);
+                        if (!oldKey) return prev;
+                        const { [oldKey]: oldData, ...rest } = prev;
+                        return { ...rest, [NN]: oldData };
+                      });
+                      setDataPrev((prev) => {
+                        const oldKey = pickKeyCI(prev, oldName);
+                        if (!oldKey) return prev;
+                        const { [oldKey]: oldData, ...rest } = prev;
+                        return { ...rest, [NN]: oldData };
+                      });
+                    }}
+                    onChangePropertyName={(ownerName, oldProp, newProp) => {
+                      if (!newProp.trim()) return;
+                      const NP = newProp;
+                      setOwners((prev) =>
+                        (prev || []).map((o) =>
+                          o.name !== ownerName
+                            ? o
+                            : { ...o, properties: (o.properties || []).map((p) => (p === oldProp ? NP : p)) }
+                        )
+                      );
+                      setDataCurrent((prev) => {
+                        const ownerKey = pickKeyCI(prev, ownerName) ?? ownerName;
+                        const od = prev?.[ownerKey] || {};
+                        const propKey = Object.keys(od).find((k) => norm(k) === norm(oldProp)) ?? oldProp;
+                        const obsKey =
+                          Object.keys(od).find(
+                            (k) => k.endsWith("__obs") && norm(k.replace(/__obs$/, "")) === norm(oldProp)
+                          ) || null;
+                        const nd = { ...od };
+                        if (propKey in nd) {
+                          nd[NP] = nd[propKey];
+                          delete nd[propKey];
+                        }
+                        if (obsKey) {
+                          nd[`${NP}__obs`] = nd[obsKey];
+                          delete nd[obsKey];
+                        }
+                        return { ...prev, [ownerKey]: nd };
+                      });
+                      setDataPrev((prev) => {
+                        const ownerKey = pickKeyCI(prev, ownerName) ?? ownerName;
+                        const od = prev?.[ownerKey] || {};
+                        const propKey = Object.keys(od).find((k) => norm(k) === norm(oldProp)) ?? oldProp;
+                        const nd = { ...od };
+                        if (propKey in nd) {
+                          nd[NP] = nd[propKey];
+                          delete nd[propKey];
+                        }
+                        return { ...prev, [ownerKey]: nd };
+                      });
+                    }}
+                    onAddProperty={(ownerName) => {
+                      setOwners((prev) =>
+                        (prev || []).map((o) => {
+                          if (o.name !== ownerName) return o;
+                          const props = o.properties || [];
+                          return { ...o, properties: [...props, `PROPIEDAD ${props.length + 1}`] };
+                        })
+                      );
+                    }}
+                    onDeleteProperty={(ownerName, propName) => {
+                      const ok = window.confirm(`¿ELIMINAR "${propName}" DE "${ownerName}"?`);
+                      if (!ok) return;
+                      setOwners((prev) =>
+                        (prev || []).map((o) =>
+                          o.name !== ownerName
+                            ? o
+                            : { ...o, properties: (o.properties || []).filter((p) => p !== propName) }
+                        )
+                      );
+                      setDataCurrent((prev) => {
+                        const ownerKey = pickKeyCI(prev, ownerName) ?? ownerName;
+                        const od = prev?.[ownerKey];
+                        if (!od) return prev;
+                        const propKey = Object.keys(od).find((k) => norm(k) === norm(propName)) ?? propName;
+                        const obsKey =
+                          Object.keys(od).find(
+                            (k) => k.endsWith("__obs") && norm(k.replace(/__obs$/, "")) === norm(propName)
+                          ) || null;
+                        const nd = { ...od };
+                        delete nd[propKey];
+                        if (obsKey) delete nd[obsKey];
+                        return { ...prev, [ownerKey]: nd };
+                      });
+                    }}
+                    onClickProperty={handleOpenHistory}
+                  />
                 );
-              })}
-            </div>
-          )}
-
-          {/* Grilla principal */}
-          {viewMode==="MONTH" ? (
-            (filteredOwners||[]).map(owner=>(
-              <OwnerGroup
-                key={owner.name}
-                ownerName={owner.name}
-                properties={owner.properties||[]}
-                dataByOwner={dataCurrent[owner.name]}
-                prevDataByOwner={dataPrev[owner.name]}
-                editing={role==="admin" && editing}
-                onChangeProperty={handleChangeProperty}
-                onChangePropertyObs={handleChangePropertyObs}
-                onChangeOwnerName={handleChangeOwnerName}
-                onChangePropertyName={handleChangePropertyName}
-                onAddProperty={handleAddProperty}
-                onDeleteProperty={handleDeleteProperty}
-                onClickProperty={handleOpenHistory}   // <— AQUÍ USAMOS LA FUNCIÓN
-              />
-            ))
+              })
           ) : (
-            (filteredOwners||[]).map(owner=>{
-              const od=dataAnnual[owner.name]||{};
-              const totalOwner=(owner.properties||[]).reduce((s,p)=> s+(od[p]?Number(od[p]):0),0);
-              return (
-                <div key={owner.name} className="owner-card">
-                  <div className="owner-header">
-                    <div className="owner-title"><span>{owner.name}</span><span className="owner-toggle-static">−</span></div>
-                    <div style={{fontSize:"0.7rem",fontWeight:600}}>TOTAL AÑO: {money(totalOwner)}</div>
-                  </div>
-                  {(owner.properties||[]).map(p=>(
-                    <div key={p} className="prop-row">
-                      <div className="prop-name"><span className="prop-plain">{p}</span></div>
-                      <div className="prop-right">
-                        <span className="obs-text"></span>
-                        <span className="var-chip neutral">—</span>
-                        <span className="prop-amount">{money(od[p]||0)}</span>
-                      </div>
-                      <div className="prop-del"></div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })
+            <div className="owner-card">
+              <div className="owner-header">
+                <div className="owner-title"><span>RESUMEN ANUAL</span></div>
+                <div className="owner-total">TOTAL: {moneyCLP0(totalGeneralYear)}</div>
+              </div>
+              <div className="annual-note">SELECCIONA AÑO EN EL HEADER</div>
+            </div>
           )}
         </div>
 
-        <div className="footer-note">control de arriendos appchile/grrdfr</div>
+        <div className="footer-note">CONTROL DE ARRIENDOS APPCHILE/GRRDFR</div>
       </div>
 
-      {/* MODAL HISTORIAL (con boundary aparte) */}
+      {/* MODAL HISTORIAL */}
       <ErrorBoundary resetKey={modalResetKey}>
         <PropertyHistoryModal
           key={modalResetKey}
           open={historyOpen}
-          onClose={()=>setHistoryOpen(false)}
+          onClose={() => setHistoryOpen(false)}
           ownerName={historyOwner}
           propertyName={historyProperty}
-          history={Array.isArray(historyData)?historyData:[]}
+          history={Array.isArray(historyData) ? historyData : []}
           loading={historyLoading}
           contract={contractData}
-          onShowToast={(m,t)=>setToast({show:true,message:m,type:t||"info"})}
-          onContractSaved={(ownerName,propertyName,payload)=>{
-            const [nat,norm]=makeContractIds(ownerName,propertyName);
-            setAllContracts(prev=>({...prev,[nat]:payload,[norm]:payload}));
-          }}
           role={role}
         />
       </ErrorBoundary>
 
-      {/* UF */}
+      {/* MODAL UF */}
       {ufModalOpen && (
-        <div className="modal-backdrop" onClick={()=>setUfModalOpen(false)}>
-          <div className="modal-card uf-modal-card" onClick={(e)=>e.stopPropagation()}>
+        <div className="modal-backdrop" onClick={() => setUfModalOpen(false)}>
+          <div className="modal-card uf-modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="modal-title">VALORES UF</div>
-              <button className="modal-close" onClick={()=>setUfModalOpen(false)}>×</button>
+              <button className="modal-close" onClick={() => setUfModalOpen(false)}>×</button>
             </div>
             <div className="modal-body uf-modal-body">
               <div className="uf-left">
-                <div className="uf-today-line">UF HOY: {ufToday? money(ufToday) : "—"}</div>
+                <div className="uf-today-line">UF HOY: {ufToday != null ? moneyCLP2(ufToday) : "$---,--"}</div>
                 <div className="section-title">ÚLTIMOS Y PRÓXIMOS 15 DÍAS</div>
                 <ul className="uf-list">
-                  {[...(ufPast||[]),...(ufFuture||[])].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)).map(it=>(
-                    <li key={it.fecha} className="uf-item">
-                      <span>{formatCLDate(it.fecha)}</span>
-                      <span>{money(it.valor)} {it.estimado?"(EST.)":""}</span>
-                    </li>
-                  ))}
+                  {[...(ufPast || []), ...(ufFuture || [])]
+                    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+                    .map((it) => (
+                      <li key={it.fecha} className="uf-item">
+                        <span>
+                          {(() => {
+                            const d = new Date(it.fecha);
+                            if (isNaN(d)) return it.fecha;
+                            const dd = String(d.getDate()).padStart(2, "0");
+                            const mm = String(d.getMonth() + 1).padStart(2, "0");
+                            const yyyy = d.getFullYear();
+                            return `${dd}-${mm}-${yyyy}`;
+                          })()}
+                        </span>
+                        <span>{moneyCLP2(it.valor)} {it.estimado ? "(EST.)" : ""}</span>
+                      </li>
+                    ))}
                 </ul>
               </div>
+
               <div className="uf-right">
                 <div className="section-title">CALCULADORA UF ⇄ PESOS</div>
-                <p style={{fontSize:".75rem",opacity:.8}}>Usa tu versión previa si ya la tenías; este panel es de referencia.</p>
+
+                <label className="uf-label">FECHA</label>
+                <input
+                  type="date"
+                  className="uf-input"
+                  value={ufCalcDate}
+                  onChange={async (e) => {
+                    const iso = e.target.value;
+                    setUfCalcDate(iso);
+                    const rate = await getUfForDate(iso);
+                    setUfCalcRate(rate);
+                  }}
+                />
+
+                <div className="uf-grid">
+                  <div>
+                    <label className="uf-label">UF</label>
+                    <input
+                      className="uf-input"
+                      placeholder="---,-- UF"
+                      value={ufCalcUF}
+                      onChange={(e) => setUfCalcUF(e.target.value)}
+                      onBlur={() => {
+                        const n = parseFloat(ufCalcUF.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", "."));
+                        if (!isNaN(n) && ufCalcRate) {
+                          const pesos = Math.round(n * ufCalcRate * 100) / 100;
+                          setUfCalcUF(new Intl.NumberFormat("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n) + " UF");
+                          setUfCalcCLP(new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", minimumFractionDigits: 2 }).format(pesos));
+                        }
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label className="uf-label">PESOS</label>
+                    <input
+                      className="uf-input"
+                      placeholder="$---,--"
+                      value={ufCalcCLP}
+                      onChange={(e) => setUfCalcCLP(e.target.value)}
+                      onBlur={() => {
+                        const n = parseFloat(ufCalcCLP.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", "."));
+                        if (!isNaN(n) && ufCalcRate) {
+                          const uf = n / ufCalcRate;
+                          setUfCalcCLP(new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", minimumFractionDigits: 2 }).format(n));
+                          setUfCalcUF(new Intl.NumberFormat("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(uf) + " UF");
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="uf-rate-note">
+                  {ufCalcRate ? `UF DEL ${(() => {
+                    const d = new Date(ufCalcDate);
+                    if (isNaN(d)) return ufCalcDate;
+                    const dd = String(d.getDate()).padStart(2, "0");
+                    const mm = String(d.getMonth() + 1).padStart(2, "0");
+                    const yyyy = d.getFullYear();
+                    return `${dd}-${mm}-${yyyy}`;
+                  })()}: ${moneyCLP2(ufCalcRate)}` : "SELECCIONE UNA FECHA"}
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Totales */}
+      {/* MODAL: TOTALES */}
       {showTotalsModal && (
-        <div className="modal-backdrop" onClick={()=>setShowTotalsModal(false)}>
-          <div className="modal-card totals-modal-card" onClick={(e)=>e.stopPropagation()}>
+        <div className="modal-backdrop" onClick={() => setShowTotalsModal(false)}>
+          <div className="modal-card totals-modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="modal-title">RESUMEN DE TOTALES POR EMPRESA</div>
-              <button className="modal-close" onClick={()=>setShowTotalsModal(false)}>×</button>
+              <button className="modal-close" onClick={() => setShowTotalsModal(false)}>×</button>
             </div>
             <div className="modal-body">
               <ul className="totals-list">
-                {(owners||[]).map(o=>{
-                  const od=viewMode==="MONTH"?(dataCurrent[o.name]||{}):(dataAnnual[o.name]||{});
-                  const total=(o.properties||[]).reduce((s,p)=> s+(od[p]?Number(od[p]):0),0);
-                  const sel=sumSelectedOwners.includes(o.name);
-                  return (<li key={o.name} className="totals-item"><span>{o.name}</span><span>{money(total)} {sel?"✓":""}</span></li>);
+                {(owners || []).map((o) => {
+                  const ok = pickKeyCI(dataCurrent, o.name);
+                  const od = viewMode === "MONTH" ? (ok ? dataCurrent[ok] : {}) : (dataAnnual[o.name] || {});
+                  const total = (o.properties || []).reduce((s, p) => {
+                    if (viewMode === "MONTH") {
+                      const pk = pickKeyCI(od, p);
+                      return s + (pk ? Number(od[pk] || 0) : 0);
+                    } else {
+                      return s + Number(od[p] || 0);
+                    }
+                  }, 0);
+                  return (
+                    <li key={o.name} className="totals-item">
+                      <span>{o.name}</span>
+                      <span>{moneyCLP0(total)}</span>
+                    </li>
+                  );
                 })}
               </ul>
               <div className="totals-footer">
-                <div>TOTAL GENERAL: {money(viewMode==="MONTH"?totalGeneralMonth:totalGeneralYear)}</div>
-                <div>SUMA SELECCIONADA: {money(viewMode==="MONTH"?totalSelectedMonth:totalSelectedYear)}</div>
+                <div>TOTAL GENERAL: {moneyCLP0(viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear)}</div>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Faltantes */}
+      {/* MODAL: CONTRATOS FALTANTES */}
       {showMissingModal && (
-        <div className="modal-backdrop" onClick={()=>setShowMissingModal(false)}>
-          <div className="modal-card missing-modal-card" onClick={(e)=>e.stopPropagation()}>
+        <div className="modal-backdrop" onClick={() => setShowMissingModal(false)}>
+          <div className="modal-card missing-modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div className="modal-title">CONTRATOS FALTANTES</div>
-              <button className="modal-close" onClick={()=>setShowMissingModal(false)}>×</button>
+              <button className="modal-close" onClick={() => setShowMissingModal(false)}>×</button>
             </div>
             <div className="modal-body">
-              {missingContractsList.length===0 ? (
-                <p style={{fontSize:".65rem"}}>No faltan contratos.</p>
-              ) : (
-                <ul className="missing-list">
-                  {missingContractsList.map((it,idx)=>(
-                    <li key={idx} className="missing-item">
-                      <span>{it.owner} / {it.property}</span>
-                      <button className="btn btn-secondary btn-sm" onClick={()=>{ setShowMissingModal(false); handleOpenHistory(it.owner,it.property); }}>
-                        VER HISTORIAL
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {(() => {
+                const list = [];
+                (owners || []).forEach((o) => {
+                  (o.properties || []).forEach((p) => {
+                    const found = resolveContract(o.name, p);
+                    if (!found) list.push({ owner: o.name, property: p });
+                  });
+                });
+                if (!list.length) return <p style={{ fontSize: ".8rem" }}>NO FALTAN CONTRATOS.</p>;
+                return (
+                  <ul className="missing-list">
+                    {list.map((it, idx) => (
+                      <li key={idx} className="missing-item">
+                        <span>{it.owner} / {it.property}</span>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => {
+                            setShowMissingModal(false);
+                            handleOpenHistory(it.owner, it.property);
+                          }}
+                        >
+                          VER HISTORIAL
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                );
+              })()}
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL: REAJUSTES DEL MES */}
+      {showReajustesModal && (
+        <ReajustesModal
+          open={showReajustesModal}
+          onClose={() => setShowReajustesModal(false)}
+          monthNumber={selectedMonthNumber}
+          owners={owners}
+          resolveContract={resolveContract}
+          onGo={(o, p) => {
+            setShowReajustesModal(false);
+            handleOpenHistory(o, p);
+          }}
+        />
+      )}
+
+      {/* MODAL: MENSAJES */}
+      {messagesOpen && (
+        <MessagesModal
+          open={messagesOpen}
+          role={role}
+          onClose={() => setMessagesOpen(false)}
+          onMarkedSeen={async () => {
+            try {
+              await setDoc(doc(db, "meta", "messages"),
+                role === "admin" ? { unreadForAdmin: false, lastSeenAdmin: serverTimestamp() } :
+                                   { unreadForViewer: false, lastSeenViewer: serverTimestamp() },
+               { merge: true });
+              setMessagesUnread(false);
+            } catch {}
+          }}
+        />
       )}
 
       {toast.show && <div className={`toast-bottom ${toast.type}`}>{toast.message}</div>}
@@ -786,12 +1000,11 @@ function AppCore(){
   );
 }
 
-/* ===== Export con Boundary global ===== */
-export default function App(){
-  const resetKey="root_"+String(Date.now()).slice(-6);
+export default function App() {
+  const resetKey = "root_" + String(Date.now()).slice(-6);
   return (
     <ErrorBoundary resetKey={resetKey}>
-      <AppCore/>
+      <AppCore />
     </ErrorBoundary>
   );
 }

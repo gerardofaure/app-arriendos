@@ -58,7 +58,7 @@ const pickKeyCI = (obj, targetName) => {
   return null;
 };
 
-// Formatea "YYYY-MM-DD" a "DD-MM-YYYY" sin romper por timezone
+// Formatea "YYYY-MM-DD" a "DD-MM-YYYY" sin jugar con timezones
 const formatIsoToDDMMYYYY = (iso) => {
   if (typeof iso !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso || "";
   const [y, m, d] = iso.split("-");
@@ -177,7 +177,7 @@ function AppCore() {
     return () => unsub();
   }, []);
 
-  /* ===== UF base (con fecha alineada al último dato) ===== */
+  /* ===== UF base (alineado al último dato real) ===== */
   useEffect(() => {
     (async () => {
       try {
@@ -216,12 +216,12 @@ function AppCore() {
           });
           setUfCache((prev) => ({ ...prev, ...cache }));
 
-          // La calculadora se alinea al último dato real
+          // La calculadora se alinea al último dato disponible
           setUfCalcDate(latestIso);
           setUfCalcRate(latestVal);
         }
       } catch {
-        // si falla, se deja tal cual
+        // ignore
       }
     })();
   }, []);
@@ -484,117 +484,153 @@ function AppCore() {
             </button>
           </div>
 
-          {/* ACCIONES */}
+          {/* ACCIONES AGRUPADAS */}
           <div className="actions-bar">
-            <button
-              className="btn"
-              onClick={() => {
-                if (viewMode === "MONTH") {
-                  setViewMode("YEAR");
-                  setHeaderMonthOpen(false);
-                } else {
-                  setViewMode("MONTH");
-                }
-              }}
-            >
-              {viewMode === "MONTH" ? "INFO ANUAL" : "VOLVER A MENSUAL"}
-            </button>
-
-            <button
-              className="btn"
-              onClick={() => {
-                const title =
-                  viewMode === "MONTH"
-                    ? `ARRIENDOS ${activeMonthLabel}`
-                    : `ARRIENDOS AÑO ${selectedYear}`;
-                let html = `
-                  <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-                  <head><meta charset="UTF-8" /><title>${title}</title>
-                  <style>table{border-collapse:collapse}th,td{border:1px solid #777;padding:4px 6px}th{background:#0f172a;color:#fff}.num{mso-number-format:"\\$ #,##0";text-align:right}</style>
-                  </head><body><h2>${title}</h2><table><tr><th>PROPIEDAD</th><th>PROPIETARIO</th><th>MONTO</th></tr>`;
-                const source =
-                  viewMode === "MONTH"
-                    ? (owners || []).flatMap((o) => {
-                        const ok = pickKeyCI(dataCurrent, o.name);
-                        const od = ok ? dataCurrent[ok] : {};
-                        return (o.properties || []).map((p) => {
-                          const pk = pickKeyCI(od, p);
-                          const val = pk ? Number(od[pk] || 0) : 0;
-                          return { prop: p, owner: o.name, val };
-                        });
-                      })
-                    : (owners || []).flatMap((o) =>
-                        (o.properties || []).map((p) => ({
-                          prop: p,
-                          owner: o.name,
-                          val: (dataAnnual[o.name] || {})[p]
-                            ? Number((dataAnnual[o.name] || {})[p])
-                            : 0,
-                        }))
-                      );
-                source.forEach((r) => {
-                  html += `<tr><td>${r.prop}</td><td>${r.owner}</td><td class="num">${r.val}</td></tr>`;
-                });
-                html += `</table></body></html>`;
-                const blob = new Blob([html], { type: "application/vnd.ms-excel" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download =
-                  viewMode === "MONTH"
-                    ? `arriendos-${selectedMonthId}.xls`
-                    : `arriendos-${selectedYear}.xls`;
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-            >
-              EXPORTAR EXCEL
-            </button>
-
-            <button
-              className="btn"
-              onClick={() => {
-                if (role === "viewer") {
-                  setToast("SOLO LECTURA", "error");
-                  return;
-                }
-                setEditing((e) => !e);
-              }}
-            >
-              {editing ? "SALIR EDICION" : "ENTRAR EDICION"}
-            </button>
-
-            {role === "admin" && editing && (
+            <div className="actions-left">
               <button
-                className="btn strong"
-                disabled={saving}
-                onClick={async () => {
-                  setSaving(true);
-                  try {
-                    await setDoc(doc(db, "rents", selectedMonthId), dataCurrent || {}, { merge: true });
-                    await setDoc(doc(db, "structure", "owners"), { owners: owners || [] }, { merge: true });
-                    await setDoc(doc(db, "meta", "app"), { appTitle: appTitle || "INFORME MENSUAL DE ARRIENDOS" }, { merge: true });
-                    setToast("CAMBIOS GUARDADOS", "success");
-                    setEditing(false);
-                  } catch (e) {
-                    setToast(`NO SE PUDO GUARDAR: ${e?.message || ""}`, "error");
-                  } finally {
-                    setSaving(false);
+                className="btn"
+                onClick={() => {
+                  if (viewMode === "MONTH") {
+                    setViewMode("YEAR");
+                    setHeaderMonthOpen(false);
+                  } else {
+                    setViewMode("MONTH");
                   }
                 }}
               >
-                {saving ? "GUARDANDO…" : "GUARDAR CAMBIOS"}
+                {viewMode === "MONTH" ? "INFO ANUAL" : "VOLVER A MENSUAL"}
               </button>
-            )}
 
-            <button className={messagesUnread ? "btn with-dot" : "btn"} onClick={() => setMessagesOpen(true)}>
-              MENSAJES
-            </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  const title =
+                    viewMode === "MONTH"
+                      ? `ARRIENDOS ${activeMonthLabel}`
+                      : `ARRIENDOS AÑO ${selectedYear}`;
+                  let html = `
+                    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+                    <head><meta charset="UTF-8" /><title>${title}</title>
+                    <style>table{border-collapse:collapse}th,td{border:1px solid #777;padding:4px 6px}th{background:#0f172a;color:#fff}.num{mso-number-format:"\\$ #,##0";text-align:right}</style>
+                    </head><body><h2>${title}</h2><table><tr><th>PROPIEDAD</th><th>PROPIETARIO</th><th>MONTO</th></tr>`;
+                  const source =
+                    viewMode === "MONTH"
+                      ? (owners || []).flatMap((o) => {
+                          const ok = pickKeyCI(dataCurrent, o.name);
+                          const od = ok ? dataCurrent[ok] : {};
+                          return (o.properties || []).map((p) => {
+                            const pk = pickKeyCI(od, p);
+                            const val = pk ? Number(od[pk] || 0) : 0;
+                            return { prop: p, owner: o.name, val };
+                          });
+                        })
+                      : (owners || []).flatMap((o) =>
+                          (o.properties || []).map((p) => ({
+                            prop: p,
+                            owner: o.name,
+                            val: (dataAnnual[o.name] || {})[p]
+                              ? Number((dataAnnual[o.name] || {})[p])
+                              : 0,
+                          }))
+                        );
+                  source.forEach((r) => {
+                    html += `<tr><td>${r.prop}</td><td>${r.owner}</td><td class="num">${r.val}</td></tr>`;
+                  });
+                  html += `</table></body></html>`;
+                  const blob = new Blob([html], { type: "application/vnd.ms-excel" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download =
+                    viewMode === "MONTH"
+                      ? `arriendos-${selectedMonthId}.xls`
+                      : `arriendos-${selectedYear}.xls`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                EXPORTAR EXCEL
+              </button>
 
-            <button className="btn" onClick={() => setShowTotalsModal(true)}>TOTALES POR EMPRESA</button>
-            <button className="btn" onClick={() => setShowMissingModal(true)}>CONTRATOS FALTANTES</button>
-            <button className="btn" onClick={() => setShowReajustesModal(true)}>REAJUSTES DEL MES</button>
-            <button className="btn" onClick={() => { setRole(null); setEditing(false); }}>SALIR</button>
+              <button className="btn" onClick={() => setShowTotalsModal(true)}>
+                TOTALES POR EMPRESA
+              </button>
+            </div>
+
+            <div className="actions-right">
+              <button
+                className={messagesUnread ? "btn with-dot" : "btn"}
+                onClick={() => setMessagesOpen(true)}
+              >
+                MENSAJES
+              </button>
+
+              <button className="btn" onClick={() => setShowMissingModal(true)}>
+                CONTRATOS FALTANTES
+              </button>
+
+              <button className="btn" onClick={() => setShowReajustesModal(true)}>
+                REAJUSTES DEL MES
+              </button>
+
+              <button
+                className="btn"
+                onClick={() => {
+                  if (role === "viewer") {
+                    setToast("SOLO LECTURA", "error");
+                    return;
+                  }
+                  setEditing((e) => !e);
+                }}
+              >
+                {editing ? "SALIR EDICION" : "ENTRAR EDICION"}
+              </button>
+
+              {role === "admin" && editing && (
+                <button
+                  className="btn strong"
+                  disabled={saving}
+                  onClick={async () => {
+                    setSaving(true);
+                    try {
+                      await setDoc(
+                        doc(db, "rents", selectedMonthId),
+                        dataCurrent || {},
+                        { merge: true }
+                      );
+                      await setDoc(
+                        doc(db, "structure", "owners"),
+                        { owners: owners || [] },
+                        { merge: true }
+                      );
+                      await setDoc(
+                        doc(db, "meta", "app"),
+                        { appTitle: appTitle || "INFORME MENSUAL DE ARRIENDOS" },
+                        { merge: true }
+                      );
+                      setToast("CAMBIOS GUARDADOS", "success");
+                      setEditing(false);
+                    } catch (e) {
+                      setToast(`NO SE PUDO GUARDAR: ${e?.message || ""}`, "error");
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                >
+                  {saving ? "GUARDANDO…" : "GUARDAR CAMBIOS"}
+                </button>
+              )}
+
+              <button
+                className="btn"
+                onClick={() => {
+                  setRole(null);
+                  setEditing(false);
+                }}
+              >
+                SALIR
+              </button>
+            </div>
           </div>
         </header>
 
@@ -860,11 +896,24 @@ function AppCore() {
                       value={ufCalcUF}
                       onChange={(e) => setUfCalcUF(e.target.value)}
                       onBlur={() => {
-                        const n = parseFloat(ufCalcUF.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", "."));
+                        const n = parseFloat(
+                          ufCalcUF.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".")
+                        );
                         if (!isNaN(n) && ufCalcRate) {
                           const pesos = Math.round(n * ufCalcRate * 100) / 100;
-                          setUfCalcUF(new Intl.NumberFormat("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n) + " UF");
-                          setUfCalcCLP(new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", minimumFractionDigits: 2 }).format(pesos));
+                          setUfCalcUF(
+                            new Intl.NumberFormat("es-CL", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            }).format(n) + " UF"
+                          );
+                          setUfCalcCLP(
+                            new Intl.NumberFormat("es-CL", {
+                              style: "currency",
+                              currency: "CLP",
+                              minimumFractionDigits: 2,
+                            }).format(pesos)
+                          );
                         }
                       }}
                     />
@@ -877,11 +926,24 @@ function AppCore() {
                       value={ufCalcCLP}
                       onChange={(e) => setUfCalcCLP(e.target.value)}
                       onBlur={() => {
-                        const n = parseFloat(ufCalcCLP.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", "."));
+                        const n = parseFloat(
+                          ufCalcCLP.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".")
+                        );
                         if (!isNaN(n) && ufCalcRate) {
                           const uf = n / ufCalcRate;
-                          setUfCalcCLP(new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", minimumFractionDigits: 2 }).format(n));
-                          setUfCalcUF(new Intl.NumberFormat("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(uf) + " UF");
+                          setUfCalcCLP(
+                            new Intl.NumberFormat("es-CL", {
+                              style: "currency",
+                              currency: "CLP",
+                              minimumFractionDigits: 2,
+                            }).format(n)
+                          );
+                          setUfCalcUF(
+                            new Intl.NumberFormat("es-CL", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            }).format(uf) + " UF"
+                          );
                         }
                       }}
                     />
@@ -911,7 +973,8 @@ function AppCore() {
               <ul className="totals-list">
                 {(owners || []).map((o) => {
                   const ok = pickKeyCI(dataCurrent, o.name);
-                  const od = viewMode === "MONTH" ? (ok ? dataCurrent[ok] : {}) : (dataAnnual[o.name] || {});
+                  const od =
+                    viewMode === "MONTH" ? (ok ? dataCurrent[ok] : {}) : (dataAnnual[o.name] || {});
                   const total = (o.properties || []).reduce((s, p) => {
                     if (viewMode === "MONTH") {
                       const pk = pickKeyCI(od, p);
@@ -929,7 +992,10 @@ function AppCore() {
                 })}
               </ul>
               <div className="totals-footer">
-                <div>TOTAL GENERAL: {moneyCLP0(viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear)}</div>
+                <div>
+                  TOTAL GENERAL:{" "}
+                  {moneyCLP0(viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear)}
+                </div>
               </div>
             </div>
           </div>
@@ -958,7 +1024,9 @@ function AppCore() {
                   <ul className="missing-list">
                     {list.map((it, idx) => (
                       <li key={idx} className="missing-item">
-                        <span>{it.owner} / {it.property}</span>
+                        <span>
+                          {it.owner} / {it.property}
+                        </span>
                         <button
                           className="btn btn-secondary btn-sm"
                           onClick={() => {
@@ -1001,10 +1069,13 @@ function AppCore() {
           onClose={() => setMessagesOpen(false)}
           onMarkedSeen={async () => {
             try {
-              await setDoc(doc(db, "meta", "messages"),
-                role === "admin" ? { unreadForAdmin: false, lastSeenAdmin: serverTimestamp() } :
-                                   { unreadForViewer: false, lastSeenViewer: serverTimestamp() },
-               { merge: true });
+              await setDoc(
+                doc(db, "meta", "messages"),
+                role === "admin"
+                  ? { unreadForAdmin: false, lastSeenAdmin: serverTimestamp() }
+                  : { unreadForViewer: false, lastSeenViewer: serverTimestamp() },
+                { merge: true }
+              );
               setMessagesUnread(false);
             } catch {}
           }}

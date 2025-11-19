@@ -132,36 +132,42 @@ export default function OwnerGroup({
               className={`prop-row-btn ${editing ? "is-editing" : ""}`}
               onClick={editing ? undefined : () => onClickProperty(ownerName, prop)}
             >
-              <div className="prop-name">
-                {editing ? (
-                  <input
-                    className="prop-name-input"
-                    defaultValue={prop}
-                    onBlur={commitPropName}
-                    onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                  />
-                ) : (
-                  <span className="prop-plain">{prop}</span>
-                )}
+              {/* Columna principal: nombre + OBS EN LÍNEA APARTE */}
+              <div className="prop-main">
+                <div className="prop-name">
+                  {editing ? (
+                    <input
+                      className="prop-name-input"
+                      defaultValue={prop}
+                      onBlur={commitPropName}
+                      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                    />
+                  ) : (
+                    <span className="prop-plain">{prop}</span>
+                  )}
+                </div>
+
+                <div className="prop-obs-line" onClick={(e) => e.stopPropagation()}>
+                  {editing ? (
+                    <input
+                      className="obs-input one-line"
+                      placeholder="OBS..."
+                      value={obs}
+                      maxLength={120}
+                      onChange={(e) =>
+                        onChangePropertyObs(ownerName, prop, e.target.value)
+                      }
+                    />
+                  ) : obs ? (
+                    <span className="obs-text one-line">{obs}</span>
+                  ) : (
+                    <span className="obs-text one-line"></span>
+                  )}
+                </div>
               </div>
 
+              {/* Derecha: variación + monto */}
               <div className="prop-right" onClick={(e) => e.stopPropagation()}>
-                {editing ? (
-                  <input
-                    className="obs-input one-line"
-                    placeholder="OBS..."
-                    value={obs}
-                    maxLength={120}
-                    onChange={(e) =>
-                      onChangePropertyObs(ownerName, prop, e.target.value)
-                    }
-                  />
-                ) : obs ? (
-                  <span className="obs-text one-line">{obs}</span>
-                ) : (
-                  <span className="obs-text one-line"></span>
-                )}
-
                 <span className={`var-chip ${pctClass}`}>
                   {deltaPct == null
                     ? "—"

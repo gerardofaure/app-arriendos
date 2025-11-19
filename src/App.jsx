@@ -127,9 +127,6 @@ function AppCore() {
   const [messagesUnread, setMessagesUnread] = useState(false);
   const [showReajustesModal, setShowReajustesModal] = useState(false);
 
-  /* Acciones móviles */
-  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
-
   /* ===== Toasters ===== */
   const showToast = (m, t = "info") => {
     setToast({ show: true, message: m, type: t });
@@ -376,112 +373,17 @@ function AppCore() {
   const computedHeaderTitle = viewMode === "YEAR" ? "INFORME ANUAL DE ARRIENDOS" : appTitle;
   const modalResetKey = `${historyOwner}__${historyProperty}__${historyOpen ? 1 : 0}`;
 
-  /* ===== Handlers compartidos (desktop + mobile) ===== */
-  const toggleViewMode = () => {
-    if (viewMode === "MONTH") {
-      setViewMode("YEAR");
-      setHeaderMonthOpen(false);
-    } else {
-      setViewMode("MONTH");
-    }
-  };
-
-  const handleExportExcel = () => {
-    const title =
-      viewMode === "MONTH"
-        ? `ARRIENDOS ${activeMonthLabel}`
-        : `ARRIENDOS AÑO ${selectedYear}`;
-    let html = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head><meta charset="UTF-8" /><title>${title}</title>
-      <style>table{border-collapse:collapse}th,td{border:1px solid #777;padding:4px 6px}th{background:#0f172a;color:#fff}.num{mso-number-format:"\\$ #,##0";text-align:right}</style>
-      </head><body><h2>${title}</h2><table><tr><th>PROPIEDAD</th><th>PROPIETARIO</th><th>MONTO</th></tr>`;
-    const source =
-      viewMode === "MONTH"
-        ? (owners || []).flatMap((o) => {
-            const ok = pickKeyCI(dataCurrent, o.name);
-            const od = ok ? dataCurrent[ok] : {};
-            return (o.properties || []).map((p) => {
-              const pk = pickKeyCI(od, p);
-              const val = pk ? Number(od[pk] || 0) : 0;
-              return { prop: p, owner: o.name, val };
-            });
-          })
-        : (owners || []).flatMap((o) =>
-            (o.properties || []).map((p) => ({
-              prop: p,
-              owner: o.name,
-              val: (dataAnnual[o.name] || {})[p]
-                ? Number((dataAnnual[o.name] || {})[p])
-                : 0,
-            }))
-          );
-    source.forEach((r) => {
-      html += `<tr><td>${r.prop}</td><td>${r.owner}</td><td class="num">${r.val}</td></tr>`;
-    });
-    html += `</table></body></html>`;
-    const blob = new Blob([html], { type: "application/vnd.ms-excel" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download =
-      viewMode === "MONTH"
-        ? `arriendos-${selectedMonthId}.xls`
-        : `arriendos-${selectedYear}.xls`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const toggleEditingMode = () => {
-    if (role === "viewer") {
-      setToast("SOLO LECTURA", "error");
-      return;
-    }
-    setEditing((e) => !e);
-  };
-
-  const handleSaveChanges = async () => {
-    setSaving(true);
-    try {
-      await setDoc(doc(db, "rents", selectedMonthId), dataCurrent || {}, { merge: true });
-      await setDoc(doc(db, "structure", "owners"), { owners: owners || [] }, { merge: true });
-      await setDoc(
-        doc(db, "meta", "app"),
-        { appTitle: appTitle || "INFORME MENSUAL DE ARRIENDOS" },
-        { merge: true }
-      );
-      setToast("CAMBIOS GUARDADOS", "success");
-      setEditing(false);
-    } catch (e) {
-      setToast(`NO SE PUDO GUARDAR: ${e?.message || ""}`, "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const openMessagesModal = () => setMessagesOpen(true);
-  const openTotalsModal = () => setShowTotalsModal(true);
-  const openMissingModal = () => setShowMissingModal(true);
-  const openReajustesModal = () => setShowReajustesModal(true);
-  const handleLogout = () => {
-    setRole(null);
-    setEditing(false);
-  };
-
-  const runAndCloseMobile = (fn) => {
-    if (typeof fn === "function") fn();
-    setMobileActionsOpen(false);
-  };
-
   /* ===== Pantalla Login ===== */
   const handleLogin = (e) => {
     e.preventDefault();
     const u = (loginUser || "").toLowerCase().trim();
     const p = (loginPass || "").trim();
     if (u === "user" && p === "123") {
-      setRole("viewer"); setLoginError("");
+      setRole("viewer");
+      setLoginError("");
     } else if (u === "admin" && p === "123") {
-      setRole("admin"); setLoginError("");
+      setRole("admin");
+      setLoginError("");
     } else {
       setLoginError("USUARIO O CONTRASEÑA INCORRECTOS");
     }
@@ -493,15 +395,30 @@ function AppCore() {
         <div className="login-shell">
           <form className="login-card" onSubmit={handleLogin}>
             <h1>CONTROL DE ARRIENDOS</h1>
-            <label>USUARIO
-              <input value={loginUser} onChange={(e) => setLoginUser(e.target.value)} autoComplete="username" />
+            <label>
+              USUARIO
+              <input
+                value={loginUser}
+                onChange={(e) => setLoginUser(e.target.value)}
+                autoComplete="username"
+              />
             </label>
-            <label>CONTRASEÑA
-              <input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} autoComplete="current-password" />
+            <label>
+              CONTRASEÑA
+              <input
+                type="password"
+                value={loginPass}
+                onChange={(e) => setLoginPass(e.target.value)}
+                autoComplete="current-password"
+              />
             </label>
-            <button type="submit" className="btn btn-primary login-btn">ENTRAR</button>
+            <button type="submit" className="btn btn-primary login-btn">
+              ENTRAR
+            </button>
             {loginError && <div className="login-error">{loginError}</div>}
-            <div className="login-hint">USER / 123 = SOLO LECTURA · ADMIN / 123 = PUEDE EDITAR</div>
+            <div className="login-hint">
+              USER / 123 = SOLO LECTURA · ADMIN / 123 = PUEDE EDITAR
+            </div>
           </form>
         </div>
       </div>
@@ -523,7 +440,11 @@ function AppCore() {
         <header className="header header-grid">
           <div className="header-line">
             {role === "admin" && editing ? (
-              <input className="app-title-input" value={appTitle} onChange={(e) => setAppTitle(e.target.value)} />
+              <input
+                className="app-title-input"
+                value={appTitle}
+                onChange={(e) => setAppTitle(e.target.value)}
+              />
             ) : (
               <div className="header-title">{computedHeaderTitle}</div>
             )}
@@ -561,19 +482,107 @@ function AppCore() {
             </button>
           </div>
 
-          {/* ACCIONES: DESKTOP + MOBILE */}
+          {/* MENÚ DE ACCIONES DEBAJO DEL SELECTOR DE MES */}
           <div className="actions-bar">
-            {/* Desktop */}
-            <div className="actions-desktop">
-              <button className="btn" onClick={toggleViewMode}>
+            {/* Izquierda: Info anual / Exportar / Totales */}
+            <div className="header-actions-left">
+              <button
+                className="btn"
+                onClick={() => {
+                  if (viewMode === "MONTH") {
+                    setViewMode("YEAR");
+                    setHeaderMonthOpen(false);
+                  } else {
+                    setViewMode("MONTH");
+                  }
+                }}
+              >
                 {viewMode === "MONTH" ? "INFO ANUAL" : "VOLVER A MENSUAL"}
               </button>
 
-              <button className="btn" onClick={handleExportExcel}>
+              <button
+                className="btn"
+                onClick={() => {
+                  const title =
+                    viewMode === "MONTH"
+                      ? `ARRIENDOS ${activeMonthLabel}`
+                      : `ARRIENDOS AÑO ${selectedYear}`;
+                  let html = `
+                  <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+                  <head><meta charset="UTF-8" /><title>${title}</title>
+                  <style>table{border-collapse:collapse}th,td{border:1px solid #777;padding:4px 6px}th{background:#0f172a;color:#fff}.num{mso-number-format:"\\$ #,##0";text-align:right}</style>
+                  </head><body><h2>${title}</h2><table><tr><th>PROPIEDAD</th><th>PROPIETARIO</th><th>MONTO</th></tr>`;
+                  const source =
+                    viewMode === "MONTH"
+                      ? (owners || []).flatMap((o) => {
+                          const ok = pickKeyCI(dataCurrent, o.name);
+                          const od = ok ? dataCurrent[ok] : {};
+                          return (o.properties || []).map((p) => {
+                            const pk = pickKeyCI(od, p);
+                            const val = pk ? Number(od[pk] || 0) : 0;
+                            return { prop: p, owner: o.name, val };
+                          });
+                        })
+                      : (owners || []).flatMap((o) =>
+                          (o.properties || []).map((p) => ({
+                            prop: p,
+                            owner: o.name,
+                            val: (dataAnnual[o.name] || {})[p]
+                              ? Number((dataAnnual[o.name] || {})[p])
+                              : 0,
+                          }))
+                        );
+                  source.forEach((r) => {
+                    html += `<tr><td>${r.prop}</td><td>${r.owner}</td><td class="num">${r.val}</td></tr>`;
+                  });
+                  html += `</table></body></html>`;
+                  const blob = new Blob([html], { type: "application/vnd.ms-excel" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download =
+                    viewMode === "MONTH"
+                      ? `arriendos-${selectedMonthId}.xls`
+                      : `arriendos-${selectedYear}.xls`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
                 EXPORTAR EXCEL
               </button>
 
-              <button className="btn" onClick={toggleEditingMode}>
+              <button className="btn" onClick={() => setShowTotalsModal(true)}>
+                TOTALES POR EMPRESA
+              </button>
+            </div>
+
+            {/* Derecha: mensajes / contratos / reajustes / edición / salir */}
+            <div className="header-actions-right">
+              <button
+                className={messagesUnread ? "btn with-dot" : "btn"}
+                onClick={() => setMessagesOpen(true)}
+              >
+                MENSAJES
+              </button>
+
+              <button className="btn" onClick={() => setShowMissingModal(true)}>
+                CONTRATOS FALTANTES
+              </button>
+
+              <button className="btn" onClick={() => setShowReajustesModal(true)}>
+                REAJUSTES DEL MES
+              </button>
+
+              <button
+                className="btn"
+                onClick={() => {
+                  if (role === "viewer") {
+                    setToast("SOLO LECTURA", "error");
+                    return;
+                  }
+                  setEditing((e) => !e);
+                }}
+              >
                 {editing ? "SALIR EDICION" : "ENTRAR EDICION"}
               </button>
 
@@ -581,116 +590,54 @@ function AppCore() {
                 <button
                   className="btn strong"
                   disabled={saving}
-                  onClick={handleSaveChanges}
+                  onClick={async () => {
+                    setSaving(true);
+                    try {
+                      await setDoc(
+                        doc(db, "rents", selectedMonthId),
+                        dataCurrent || {},
+                        { merge: true }
+                      );
+                      await setDoc(
+                        doc(db, "structure", "owners"),
+                        { owners: owners || [] },
+                        { merge: true }
+                      );
+                      await setDoc(
+                        doc(db, "meta", "app"),
+                        {
+                          appTitle: appTitle || "INFORME MENSUAL DE ARRIENDOS",
+                        },
+                        { merge: true }
+                      );
+                      setToast("CAMBIOS GUARDADOS", "success");
+                      setEditing(false);
+                    } catch (e) {
+                      setToast(`NO SE PUDO GUARDAR: ${e?.message || ""}`, "error");
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
                 >
                   {saving ? "GUARDANDO…" : "GUARDAR CAMBIOS"}
                 </button>
               )}
 
               <button
-                className={messagesUnread ? "btn with-dot" : "btn"}
-                onClick={openMessagesModal}
+                className="btn"
+                onClick={() => {
+                  setRole(null);
+                  setEditing(false);
+                }}
               >
-                MENSAJES
-              </button>
-
-              <button className="btn" onClick={openTotalsModal}>
-                TOTALES POR EMPRESA
-              </button>
-              <button className="btn" onClick={openMissingModal}>
-                CONTRATOS FALTANTES
-              </button>
-              <button className="btn" onClick={openReajustesModal}>
-                REAJUSTES DEL MES
-              </button>
-              <button className="btn" onClick={handleLogout}>
                 SALIR
               </button>
-            </div>
-
-            {/* Mobile (iPhone 11 y similares) */}
-            <div className="actions-mobile">
-              <button
-                className="btn"
-                onClick={() => setMobileActionsOpen((v) => !v)}
-              >
-                MENÚ ▾
-              </button>
-              {mobileActionsOpen && (
-                <div className="actions-dropdown">
-                  <button
-                    className="dropdown-item"
-                    onClick={() => runAndCloseMobile(toggleViewMode)}
-                  >
-                    {viewMode === "MONTH" ? "INFO ANUAL" : "VOLVER A MENSUAL"}
-                  </button>
-
-                  <button
-                    className="dropdown-item"
-                    onClick={() => runAndCloseMobile(handleExportExcel)}
-                  >
-                    EXPORTAR EXCEL
-                  </button>
-
-                  <button
-                    className="dropdown-item"
-                    onClick={() => runAndCloseMobile(toggleEditingMode)}
-                  >
-                    {editing ? "SALIR EDICION" : "ENTRAR EDICION"}
-                  </button>
-
-                  {role === "admin" && editing && (
-                    <button
-                      className="dropdown-item strong"
-                      disabled={saving}
-                      onClick={() => runAndCloseMobile(handleSaveChanges)}
-                    >
-                      {saving ? "GUARDANDO…" : "GUARDAR CAMBIOS"}
-                    </button>
-                  )}
-
-                  <button
-                    className="dropdown-item"
-                    onClick={() => runAndCloseMobile(openMessagesModal)}
-                  >
-                    {messagesUnread ? "MENSAJES (●)" : "MENSAJES"}
-                  </button>
-
-                  <button
-                    className="dropdown-item"
-                    onClick={() => runAndCloseMobile(openTotalsModal)}
-                  >
-                    TOTALES POR EMPRESA
-                  </button>
-
-                  <button
-                    className="dropdown-item"
-                    onClick={() => runAndCloseMobile(openMissingModal)}
-                  >
-                    CONTRATOS FALTANTES
-                  </button>
-
-                  <button
-                    className="dropdown-item"
-                    onClick={() => runAndCloseMobile(openReajustesModal)}
-                  >
-                    REAJUSTES DEL MES
-                  </button>
-
-                  <button
-                    className="dropdown-item"
-                    onClick={() => runAndCloseMobile(handleLogout)}
-                  >
-                    SALIR
-                  </button>
-                </div>
-              )}
             </div>
           </div>
         </header>
 
         {/* CUERPO */}
-        <div className={(loading || saving) ? "app-body blurred" : "app-body"}>
+        <div className={loading || saving ? "app-body blurred" : "app-body"}>
           {/* Filtros */}
           <div className="filters-bar">
             <div>
@@ -702,7 +649,9 @@ function AppCore() {
               >
                 <option value="ALL">TODOS</option>
                 {(owners || []).map((o) => (
-                  <option key={o.name} value={o.name}>{o.name}</option>
+                  <option key={o.name} value={o.name}>
+                    {o.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -718,7 +667,8 @@ function AppCore() {
 
             <div className="filter-summary">
               <button className="btn btn-secondary">
-                TOTAL GENERAL: {moneyCLP0(viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear)}
+                TOTAL GENERAL:{" "}
+                {moneyCLP0(viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear)}
               </button>
             </div>
           </div>
@@ -752,7 +702,10 @@ function AppCore() {
                           Object.keys(od).find((k) => norm(k) === norm(propertyName)) ?? propertyName;
                         return {
                           ...prev,
-                          [ownerKey]: { ...od, [propKey]: newValue === "" ? "" : Number(newValue) },
+                          [ownerKey]: {
+                            ...od,
+                            [propKey]: newValue === "" ? "" : Number(newValue),
+                          },
                         };
                       });
                     }}
@@ -762,10 +715,13 @@ function AppCore() {
                         const od = prev?.[ownerKey] || {};
                         const existingObsKey =
                           Object.keys(od).find(
-                            (k) => k.endsWith("__obs") && norm(k.replace(/__obs$/, "")) === norm(propertyName)
+                            (k) =>
+                              k.endsWith("__obs") &&
+                              norm(k.replace(/__obs$/, "")) === norm(propertyName)
                           ) || null;
                         const propKey =
-                          Object.keys(od).find((k) => norm(k) === norm(propertyName)) ?? propertyName;
+                          Object.keys(od).find((k) => norm(k) === norm(propertyName)) ??
+                          propertyName;
                         const obsKey = existingObsKey || `${propKey}__obs`;
                         return { ...prev, [ownerKey]: { ...od, [obsKey]: newObs } };
                       });
@@ -773,7 +729,11 @@ function AppCore() {
                     onChangeOwnerName={(oldName, newName) => {
                       if (!newName.trim()) return;
                       const NN = newName;
-                      setOwners((prev) => (prev || []).map((o) => (o.name === oldName ? { ...o, name: NN } : o)));
+                      setOwners((prev) =>
+                        (prev || []).map((o) =>
+                          o.name === oldName ? { ...o, name: NN } : o
+                        )
+                      );
                       setDataCurrent((prev) => {
                         const oldKey = pickKeyCI(prev, oldName);
                         if (!oldKey) return prev;
@@ -794,16 +754,25 @@ function AppCore() {
                         (prev || []).map((o) =>
                           o.name !== ownerName
                             ? o
-                            : { ...o, properties: (o.properties || []).map((p) => (p === oldProp ? NP : p)) }
+                            : {
+                                ...o,
+                                properties: (o.properties || []).map((p) =>
+                                  p === oldProp ? NP : p
+                                ),
+                              }
                         )
                       );
                       setDataCurrent((prev) => {
                         const ownerKey = pickKeyCI(prev, ownerName) ?? ownerName;
                         const od = prev?.[ownerKey] || {};
-                        const propKey = Object.keys(od).find((k) => norm(k) === norm(oldProp)) ?? oldProp;
+                        const propKey =
+                          Object.keys(od).find((k) => norm(k) === norm(oldProp)) ??
+                          oldProp;
                         const obsKey =
                           Object.keys(od).find(
-                            (k) => k.endsWith("__obs") && norm(k.replace(/__obs$/, "")) === norm(oldProp)
+                            (k) =>
+                              k.endsWith("__obs") &&
+                              norm(k.replace(/__obs$/, "")) === norm(oldProp)
                           ) || null;
                         const nd = { ...od };
                         if (propKey in nd) {
@@ -819,7 +788,9 @@ function AppCore() {
                       setDataPrev((prev) => {
                         const ownerKey = pickKeyCI(prev, ownerName) ?? ownerName;
                         const od = prev?.[ownerKey] || {};
-                        const propKey = Object.keys(od).find((k) => norm(k) === norm(oldProp)) ?? oldProp;
+                        const propKey =
+                          Object.keys(od).find((k) => norm(k) === norm(oldProp)) ??
+                          oldProp;
                         const nd = { ...od };
                         if (propKey in nd) {
                           nd[NP] = nd[propKey];
@@ -833,28 +804,42 @@ function AppCore() {
                         (prev || []).map((o) => {
                           if (o.name !== ownerName) return o;
                           const props = o.properties || [];
-                          return { ...o, properties: [...props, `PROPIEDAD ${props.length + 1}`] };
+                          return {
+                            ...o,
+                            properties: [...props, `PROPIEDAD ${props.length + 1}`],
+                          };
                         })
                       );
                     }}
                     onDeleteProperty={(ownerName, propName) => {
-                      const ok = window.confirm(`¿ELIMINAR "${propName}" DE "${ownerName}"?`);
+                      const ok = window.confirm(
+                        `¿ELIMINAR "${propName}" DE "${ownerName}"?`
+                      );
                       if (!ok) return;
                       setOwners((prev) =>
                         (prev || []).map((o) =>
                           o.name !== ownerName
                             ? o
-                            : { ...o, properties: (o.properties || []).filter((p) => p !== propName) }
+                            : {
+                                ...o,
+                                properties: (o.properties || []).filter(
+                                  (p) => p !== propName
+                                ),
+                              }
                         )
                       );
                       setDataCurrent((prev) => {
                         const ownerKey = pickKeyCI(prev, ownerName) ?? ownerName;
                         const od = prev?.[ownerKey];
                         if (!od) return prev;
-                        const propKey = Object.keys(od).find((k) => norm(k) === norm(propName)) ?? propName;
+                        const propKey =
+                          Object.keys(od).find((k) => norm(k) === norm(propName)) ??
+                          propName;
                         const obsKey =
                           Object.keys(od).find(
-                            (k) => k.endsWith("__obs") && norm(k.replace(/__obs$/, "")) === norm(propName)
+                            (k) =>
+                              k.endsWith("__obs") &&
+                              norm(k.replace(/__obs$/, "")) === norm(propName)
                           ) || null;
                         const nd = { ...od };
                         delete nd[propKey];
@@ -869,8 +854,12 @@ function AppCore() {
           ) : (
             <div className="owner-card">
               <div className="owner-header">
-                <div className="owner-title"><span>RESUMEN ANUAL</span></div>
-                <div className="owner-total">TOTAL: {moneyCLP0(totalGeneralYear)}</div>
+                <div className="owner-title">
+                  <span>RESUMEN ANUAL</span>
+                </div>
+                <div className="owner-total">
+                  TOTAL: {moneyCLP0(totalGeneralYear)}
+                </div>
               </div>
               <div className="annual-note">SELECCIONA AÑO EN EL HEADER</div>
             </div>
@@ -898,14 +887,24 @@ function AppCore() {
       {/* MODAL UF */}
       {ufModalOpen && (
         <div className="modal-backdrop" onClick={() => setUfModalOpen(false)}>
-          <div className="modal-card uf-modal-card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-card uf-modal-card"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-header">
               <div className="modal-title">VALORES UF</div>
-              <button className="modal-close" onClick={() => setUfModalOpen(false)}>×</button>
+              <button
+                className="modal-close"
+                onClick={() => setUfModalOpen(false)}
+              >
+                ×
+              </button>
             </div>
             <div className="modal-body uf-modal-body">
               <div className="uf-left">
-                <div className="uf-today-line">UF HOY: {ufToday != null ? moneyCLP2(ufToday) : "$---,--"}</div>
+                <div className="uf-today-line">
+                  UF HOY: {ufToday != null ? moneyCLP2(ufToday) : "$---,--"}
+                </div>
                 <div className="section-title">ÚLTIMOS Y PRÓXIMOS 15 DÍAS</div>
                 <ul className="uf-list">
                   {[...(ufPast || []), ...(ufFuture || [])]
@@ -922,7 +921,9 @@ function AppCore() {
                             return `${dd}-${mm}-${yyyy}`;
                           })()}
                         </span>
-                        <span>{moneyCLP2(it.valor)} {it.estimado ? "(EST.)" : ""}</span>
+                        <span>
+                          {moneyCLP2(it.valor)} {it.estimado ? "(EST.)" : ""}
+                        </span>
                       </li>
                     ))}
                 </ul>
@@ -953,11 +954,28 @@ function AppCore() {
                       value={ufCalcUF}
                       onChange={(e) => setUfCalcUF(e.target.value)}
                       onBlur={() => {
-                        const n = parseFloat(ufCalcUF.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", "."));
+                        const n = parseFloat(
+                          ufCalcUF
+                            .replace(/[^\d,.-]/g, "")
+                            .replace(/\./g, "")
+                            .replace(",", ".")
+                        );
                         if (!isNaN(n) && ufCalcRate) {
-                          const pesos = Math.round(n * ufCalcRate * 100) / 100;
-                          setUfCalcUF(new Intl.NumberFormat("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n) + " UF");
-                          setUfCalcCLP(new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", minimumFractionDigits: 2 }).format(pesos));
+                          const pesos =
+                            Math.round(n * ufCalcRate * 100) / 100;
+                          setUfCalcUF(
+                            new Intl.NumberFormat("es-CL", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            }).format(n) + " UF"
+                          );
+                          setUfCalcCLP(
+                            new Intl.NumberFormat("es-CL", {
+                              style: "currency",
+                              currency: "CLP",
+                              minimumFractionDigits: 2,
+                            }).format(pesos)
+                          );
                         }
                       }}
                     />
@@ -970,11 +988,27 @@ function AppCore() {
                       value={ufCalcCLP}
                       onChange={(e) => setUfCalcCLP(e.target.value)}
                       onBlur={() => {
-                        const n = parseFloat(ufCalcCLP.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", "."));
+                        const n = parseFloat(
+                          ufCalcCLP
+                            .replace(/[^\d,.-]/g, "")
+                            .replace(/\./g, "")
+                            .replace(",", ".")
+                        );
                         if (!isNaN(n) && ufCalcRate) {
                           const uf = n / ufCalcRate;
-                          setUfCalcCLP(new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", minimumFractionDigits: 2 }).format(n));
-                          setUfCalcUF(new Intl.NumberFormat("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(uf) + " UF");
+                          setUfCalcCLP(
+                            new Intl.NumberFormat("es-CL", {
+                              style: "currency",
+                              currency: "CLP",
+                              minimumFractionDigits: 2,
+                            }).format(n)
+                          );
+                          setUfCalcUF(
+                            new Intl.NumberFormat("es-CL", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            }).format(uf) + " UF"
+                          );
                         }
                       }}
                     />
@@ -982,14 +1016,16 @@ function AppCore() {
                 </div>
 
                 <div className="uf-rate-note">
-                  {ufCalcRate ? `UF DEL ${(() => {
-                    const d = new Date(ufCalcDate);
-                    if (isNaN(d)) return ufCalcDate;
-                    const dd = String(d.getDate()).padStart(2, "0");
-                    const mm = String(d.getMonth() + 1).padStart(2, "0");
-                    const yyyy = d.getFullYear();
-                    return `${dd}-${mm}-${yyyy}`;
-                  })()}: ${moneyCLP2(ufCalcRate)}` : "SELECCIONE UNA FECHA"}
+                  {ufCalcRate
+                    ? `UF DEL ${(() => {
+                        const d = new Date(ufCalcDate);
+                        if (isNaN(d)) return ufCalcDate;
+                        const dd = String(d.getDate()).padStart(2, "0");
+                        const mm = String(d.getMonth() + 1).padStart(2, "0");
+                        const yyyy = d.getFullYear();
+                        return `${dd}-${mm}-${yyyy}`;
+                      })()}: ${moneyCLP2(ufCalcRate)}`
+                    : "SELECCIONE UNA FECHA"}
                 </div>
               </div>
             </div>
@@ -1000,16 +1036,29 @@ function AppCore() {
       {/* MODAL: TOTALES */}
       {showTotalsModal && (
         <div className="modal-backdrop" onClick={() => setShowTotalsModal(false)}>
-          <div className="modal-card totals-modal-card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-card totals-modal-card"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-header">
               <div className="modal-title">RESUMEN DE TOTALES POR EMPRESA</div>
-              <button className="modal-close" onClick={() => setShowTotalsModal(false)}>×</button>
+              <button
+                className="modal-close"
+                onClick={() => setShowTotalsModal(false)}
+              >
+                ×
+              </button>
             </div>
             <div className="modal-body">
               <ul className="totals-list">
                 {(owners || []).map((o) => {
                   const ok = pickKeyCI(dataCurrent, o.name);
-                  const od = viewMode === "MONTH" ? (ok ? dataCurrent[ok] : {}) : (dataAnnual[o.name] || {});
+                  const od =
+                    viewMode === "MONTH"
+                      ? ok
+                        ? dataCurrent[ok]
+                        : {}
+                      : dataAnnual[o.name] || {};
                   const total = (o.properties || []).reduce((s, p) => {
                     if (viewMode === "MONTH") {
                       const pk = pickKeyCI(od, p);
@@ -1027,7 +1076,14 @@ function AppCore() {
                 })}
               </ul>
               <div className="totals-footer">
-                <div>TOTAL GENERAL: {moneyCLP0(viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear)}</div>
+                <div>
+                  TOTAL GENERAL:{" "}
+                  {moneyCLP0(
+                    viewMode === "MONTH"
+                      ? totalGeneralMonth
+                      : totalGeneralYear
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1037,10 +1093,18 @@ function AppCore() {
       {/* MODAL: CONTRATOS FALTANTES */}
       {showMissingModal && (
         <div className="modal-backdrop" onClick={() => setShowMissingModal(false)}>
-          <div className="modal-card missing-modal-card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-card missing-modal-card"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="modal-header">
               <div className="modal-title">CONTRATOS FALTANTES</div>
-              <button className="modal-close" onClick={() => setShowMissingModal(false)}>×</button>
+              <button
+                className="modal-close"
+                onClick={() => setShowMissingModal(false)}
+              >
+                ×
+              </button>
             </div>
             <div className="modal-body">
               {(() => {
@@ -1051,12 +1115,17 @@ function AppCore() {
                     if (!found) list.push({ owner: o.name, property: p });
                   });
                 });
-                if (!list.length) return <p style={{ fontSize: ".8rem" }}>NO FALTAN CONTRATOS.</p>;
+                if (!list.length)
+                  return (
+                    <p style={{ fontSize: ".8rem" }}>NO FALTAN CONTRATOS.</p>
+                  );
                 return (
                   <ul className="missing-list">
                     {list.map((it, idx) => (
                       <li key={idx} className="missing-item">
-                        <span>{it.owner} / {it.property}</span>
+                        <span>
+                          {it.owner} / {it.property}
+                        </span>
                         <button
                           className="btn btn-secondary btn-sm"
                           onClick={() => {
@@ -1112,7 +1181,9 @@ function AppCore() {
         />
       )}
 
-      {toast.show && <div className={`toast-bottom ${toast.type}`}>{toast.message}</div>}
+      {toast.show && (
+        <div className={`toast-bottom ${toast.type}`}>{toast.message}</div>
+      )}
     </div>
   );
 }

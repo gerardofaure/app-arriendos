@@ -169,13 +169,27 @@ body {
 .minitable-row:nth-child(odd) { background: #0f162b; }
 .ta-right { text-align: right; }
 
-.bars {
-  height: 140px; display: flex; align-items: flex-end; gap: 8px; padding: 4px 2px;
-  border: 1px dashed var(--border); border-radius: 10px; background: #0e172d;
+/* Nuevo gráfico de líneas sutil */
+.history-chart {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: #0e172d;
+  padding: 6px 4px;
+  margin-top: 4px;
+  height: 120px; /* similar en alto al bloque de la tabla */
 }
-.bar-item { width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; }
-.bar { width: 100%; max-width: 36px; background: #1d4ed8; border-radius: 6px 6px 2px 2px; }
-.bar-label { font-size: .7rem; color: var(--muted); }
+.history-chart svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.history-chart-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: .7rem;
+  color: var(--muted);
+}
 
 .contract-info { background: var(--bg-softer); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
 .kv-grid {

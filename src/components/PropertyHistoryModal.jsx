@@ -80,6 +80,61 @@ export default function PropertyHistoryModal({
     reajusteMeses: [], // array de números
   });
 
+  // Stats para el gráfico
+  const { maxValue, minValue } = useMemo(() => {
+    if (!Array.isArray(history) || !history.length) {
+      return { maxValue: 1, minValue: 0 };
+    }
+    const vals = history.map((h) => Number(h.value || 0));
+    const max = Math.max(...vals);
+    const min = Math.min(...vals);
+    return { maxValue: max || 1, minValue: min || 0 };
+  }, [history]);
+
+  // Puntos pre-calculados del gráfico de líneas
+  const chartPoints = useMemo(() => {
+    const src =
+      history && history.length
+        ? history
+        : [{ monthId: "0", monthLabel: "—", value: 0 }];
+
+    const H = 110;  // altura sutil
+    const W = 260;  // ancho de viewBox (se escala al 100%)
+    const paddingX = 8;
+    const paddingY = 8;
+    const span = maxValue - minValue || 1;
+
+    const points = [];
+    const meta = [];
+
+    src.forEach((r, idx) => {
+      const t = src.length > 1 ? idx / (src.length - 1) : 0.5; // 0..1
+      const vRaw = Number(r.value || 0);
+      const rel = (vRaw - minValue) / span;
+      const vClamped = Number.isFinite(rel)
+        ? Math.min(1, Math.max(0, rel))
+        : 0.5;
+      const y = H - paddingY - vClamped * (H - 2 * paddingY);
+      const x = paddingX + t * (W - 2 * paddingX);
+
+      points.push(`${x},${y}`);
+      meta.push({
+        x,
+        y,
+        label: r.monthLabel || "—",
+        value: vRaw,
+        id: r.monthId ?? idx,
+      });
+    });
+
+    return {
+      H,
+      W,
+      pointsStr: points.join(" "),
+      meta,
+    };
+  }, [history, maxValue, minValue]);
+
   // Inicializa formularios cuando cambie el contrato o al abrir
   useEffect(() => {
     const f = (k) => firstHit(contract, FIELDS[k]);
@@ -99,79 +154,11 @@ export default function PropertyHistoryModal({
       telefonoAval: f("telefonoAval") || "",
       contratoUrl: f("contratoUrl") || "",
       reajusteMeses: Array.isArray(rj)
-        ? rj
-            .filter((x) => Number(x) >= 1 && Number(x) <= 12)
-            .map((x) => Number(x))
+        ? rj.filter((x) => Number(x) >= 1 && Number(x) <= 12).map((x) => Number(x))
         : [],
     });
     setIsEditing(false);
   }, [contract, open]);
-
-  /** ===== ESCALA DEL GRÁFICO: MUCHO MÁS SENSIBLE =====
-   * Usamos min y max de la serie y agregamos un padding
-   * para que pequeños cambios (0,5%) se vean como una pendiente visible.
-   */
-  const chartScale = useMemo(() => {
-    const vals = history
-      .map((h) => Number(h.value || 0))
-      .filter((v) => !isNaN(v));
-
-    if (!vals.length) {
-      return { minVal: 0, maxVal: 0, range: 0 };
-    }
-
-    let minVal = Math.min(...vals);
-    let maxVal = Math.max(...vals);
-
-    if (minVal === maxVal) {
-      // Todos iguales → agregamos un rango artificial alrededor
-      const base = minVal === 0 ? 1 : Math.abs(minVal);
-      const pad = base * 0.02; // 2% de padding
-      minVal = minVal - pad;
-      maxVal = maxVal + pad;
-    } else {
-      // Añadimos un pequeño padding para exagerar un poco las diferencias
-      const baseRange = maxVal - minVal;
-      const pad = baseRange * 0.1; // 10% de padding
-      minVal = minVal - pad;
-      maxVal = maxVal + pad;
-    }
-
-    const range = maxVal - minVal || 1;
-    return { minVal, maxVal, range };
-  }, [history]);
-
-  // Puntos para gráfico de línea (SVG) — usando escala min/max
-  const chartPoints = useMemo(() => {
-    if (!history.length || chartScale.range === 0) return "";
-    const n = history.length;
-
-    return history
-      .map((h, idx) => {
-        const x = n === 1 ? 0 : (idx / (n - 1)) * 100; // 0 a 100 en el eje X
-        const v = Number(h.value || 0);
-        const norm = (v - chartScale.minVal) / chartScale.range;
-        // comprimimos a un rango 10%–90% de alto para que no pegue techo/piso
-        const clamped = Math.max(0, Math.min(1, norm));
-        const y = 90 - clamped * 80; // 90 → bottom, 10 → top
-        return `${x},${y}`;
-      })
-      .join(" ");
-  }, [history, chartScale]);
-
-  const chartDots = useMemo(() => {
-    if (!history.length || chartScale.range === 0) return [];
-    const n = history.length;
-
-    return history.map((h, idx) => {
-      const x = n === 1 ? 0 : (idx / (n - 1)) * 100;
-      const v = Number(h.value || 0);
-      const norm = (v - chartScale.minVal) / chartScale.range;
-      const clamped = Math.max(0, Math.min(1, norm));
-      const y = 90 - clamped * 80;
-      return { x, y, label: h.monthLabel || "", value: v };
-    });
-  }, [history, chartScale]);
 
   const toggleReajusteMes = (n) => {
     setForm((f) => {
@@ -236,7 +223,9 @@ export default function PropertyHistoryModal({
       <div className="modal-card history-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">DETALLE DE {propertyName}</div>
-          <button className="modal-close" onClick={onClose}>×</button>
+          <button className="modal-close" onClick={onClose}>
+            ×
+          </button>
         </div>
 
         <div className="modal-body history-body">
@@ -267,56 +256,54 @@ export default function PropertyHistoryModal({
                       history.map((r) => (
                         <div key={r.monthId} className="minitable-row">
                           <div>{r.monthLabel}</div>
-                          <div style={{ textAlign: "right" }}>{moneyCLP0(r.value)}</div>
+                          <div style={{ textAlign: "right" }}>
+                            {moneyCLP0(r.value)}
+                          </div>
                         </div>
                       ))
                     )}
                   </div>
                 </div>
 
-                {/* Gráfico de línea responsive, con escala min/max */}
+                {/* Gráfico de líneas sutil */}
                 <div className="history-chart">
-                  {history.length === 0 ? (
-                    <div className="history-chart-empty">SIN DATOS PARA GRAFICAR</div>
-                  ) : (
-                    <svg
-                      className="history-chart-svg"
-                      viewBox="0 0 100 100"
-                      preserveAspectRatio="none"
-                    >
-                      {/* Línea */}
+                  <svg
+                    viewBox={`0 0 ${chartPoints.W} ${chartPoints.H}`}
+                    preserveAspectRatio="none"
+                  >
+                    {chartPoints.meta.length > 1 && (
                       <polyline
+                        points={chartPoints.pointsStr}
                         fill="none"
-                        stroke="#BB86FC"
-                        strokeWidth="2"
-                        points={chartPoints}
+                        stroke="#bb86fc"
+                        strokeWidth="1.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
                       />
-                      {/* Puntos */}
-                      {chartDots.map((pt, idx) => (
-                        <circle
-                          key={idx}
-                          cx={pt.x}
-                          cy={pt.y}
-                          r={1.8}
-                          fill="#BB86FC"
-                        />
-                      ))}
-                    </svg>
-                  )}
-                  {/* Etiquetas de meses abreviadas bajo el gráfico */}
-                  {history.length > 0 && (
-                    <div className="history-chart-labels">
-                      {history.map((r) => {
-                        const short =
-                          (r.monthLabel || "—").split(" ")[0].slice(0, 3).toUpperCase();
-                        return (
-                          <span key={r.monthId} className="history-chart-label">
-                            {short}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
+                    )}
+
+                    {chartPoints.meta.map((pt) => (
+                      <circle
+                        key={pt.id}
+                        cx={pt.x}
+                        cy={pt.y}
+                        r={2.2}
+                        fill="#bb86fc"
+                      >
+                        <title>
+                          {pt.label}: {moneyCLP0(pt.value)}
+                        </title>
+                      </circle>
+                    ))}
+                  </svg>
+
+                  <div className="history-chart-labels">
+                    {chartPoints.meta.map((pt) => (
+                      <span key={`lbl-${pt.id}`}>
+                        {(pt.label || "—").split(" ")[0]}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </section>
 
@@ -345,7 +332,10 @@ export default function PropertyHistoryModal({
                       </div>
                       <div className="k">VALOR ARRIENDO</div>
                       <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.valorArriendo), true)}
+                        {labelOrDash(
+                          firstHit(contract, FIELDS.valorArriendo),
+                          true
+                        )}
                       </div>
                       <div className="k">GARANTÍA</div>
                       <div className="v">
@@ -384,7 +374,8 @@ export default function PropertyHistoryModal({
                             target="_blank"
                             rel="noreferrer"
                           >
-                            CONTRATO PDF {propertyName ? propertyName.toUpperCase() : ""}
+                            CONTRATO PDF{" "}
+                            {propertyName ? propertyName.toUpperCase() : ""}
                           </a>
                         ) : (
                           "NO DISPONIBLE"
@@ -395,9 +386,9 @@ export default function PropertyHistoryModal({
                         {(() => {
                           const rj = firstHit(contract, FIELDS.reajusteMeses);
                           const arr = Array.isArray(rj) ? rj : [];
-                          const labels = MESES.filter((m) => arr.includes(m.n)).map(
-                            (m) => m.abbr
-                          );
+                          const labels = MESES.filter((m) =>
+                            arr.includes(m.n)
+                          ).map((m) => m.abbr);
                           return labels.length ? labels.join("-") : "—";
                         })()}
                       </div>
@@ -412,7 +403,10 @@ export default function PropertyHistoryModal({
                           className="filter-input"
                           value={form.direccion}
                           onChange={(e) =>
-                            setForm((f) => ({ ...f, direccion: e.target.value }))
+                            setForm((f) => ({
+                              ...f,
+                              direccion: e.target.value,
+                            }))
                           }
                         />
                       </div>
@@ -422,7 +416,10 @@ export default function PropertyHistoryModal({
                           className="filter-input"
                           value={form.inicio}
                           onChange={(e) =>
-                            setForm((f) => ({ ...f, inicio: e.target.value }))
+                            setForm((f) => ({
+                              ...f,
+                              inicio: e.target.value,
+                            }))
                           }
                           placeholder="DD-MM-AAAA"
                         />
@@ -433,7 +430,10 @@ export default function PropertyHistoryModal({
                           className="filter-input"
                           value={form.vence}
                           onChange={(e) =>
-                            setForm((f) => ({ ...f, vence: e.target.value }))
+                            setForm((f) => ({
+                              ...f,
+                              vence: e.target.value,
+                            }))
                           }
                           placeholder="DD-MM-AAAA"
                         />
@@ -444,7 +444,10 @@ export default function PropertyHistoryModal({
                           className="filter-input"
                           value={form.aviso}
                           onChange={(e) =>
-                            setForm((f) => ({ ...f, aviso: e.target.value }))
+                            setForm((f) => ({
+                              ...f,
+                              aviso: e.target.value,
+                            }))
                           }
                           placeholder="DD-MM-AAAA"
                         />
@@ -469,7 +472,10 @@ export default function PropertyHistoryModal({
                           className="filter-input"
                           value={form.garantia}
                           onChange={(e) =>
-                            setForm((f) => ({ ...f, garantia: e.target.value }))
+                            setForm((f) => ({
+                              ...f,
+                              garantia: e.target.value,
+                            }))
                           }
                           placeholder="$"
                         />
@@ -493,7 +499,10 @@ export default function PropertyHistoryModal({
                           className="filter-input"
                           value={form.correo}
                           onChange={(e) =>
-                            setForm((f) => ({ ...f, correo: e.target.value }))
+                            setForm((f) => ({
+                              ...f,
+                              correo: e.target.value,
+                            }))
                           }
                         />
                       </div>
@@ -503,7 +512,10 @@ export default function PropertyHistoryModal({
                           className="filter-input"
                           value={form.telefono}
                           onChange={(e) =>
-                            setForm((f) => ({ ...f, telefono: e.target.value }))
+                            setForm((f) => ({
+                              ...f,
+                              telefono: e.target.value,
+                            }))
                           }
                         />
                       </div>
@@ -609,7 +621,8 @@ export default function PropertyHistoryModal({
                 GUARDAR
               </button>
               <button className="btn" onClick={() => setIsEditing(false)}>
-                CANCELAR</button>
+                CANCELAR
+              </button>
             </>
           )}
           <button className="btn" onClick={onClose}>

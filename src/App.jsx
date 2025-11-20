@@ -58,13 +58,6 @@ const pickKeyCI = (obj, targetName) => {
   return null;
 };
 
-// Formatea "YYYY-MM-DD" a "DD-MM-YYYY" sin jugar con timezones
-const formatIsoToDDMMYYYY = (iso) => {
-  if (typeof iso !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso || "";
-  const [y, m, d] = iso.split("-");
-  return `${d}-${m}-${y}`;
-};
-
 /* ===== App ===== */
 function AppCore() {
   /* Login */
@@ -80,11 +73,27 @@ function AppCore() {
   const [selectedMonthId, setSelectedMonthId] = useState(todayId);
   const [selectedYear, setSelectedYear] = useState(today.getFullYear());
   const { year: selYear, month, monthName } = monthIdToParts(selectedMonthId);
+
   const activeMonthLabel = useMemo(() => {
     const f = monthList.find((m) => m.id === selectedMonthId);
     return (f ? f.label : `${monthName} ${selYear}`).toUpperCase();
   }, [monthList, selectedMonthId, monthName, selYear]);
-  const selectedMonthNumber = useMemo(() => Number(selectedMonthId.slice(5, 7)), [selectedMonthId]);
+
+  const selectedMonthNumber = useMemo(
+    () => Number(selectedMonthId.slice(5, 7)),
+    [selectedMonthId]
+  );
+
+  /* NUEVO: opciones de año para selector */
+  const yearOptions = useMemo(() => {
+    const y = new Date().getFullYear();
+    // últimos 6 años (ajustable)
+    return Array.from({ length: 6 }, (_, i) => y - i);
+  }, []);
+  const activeYearLabel = useMemo(
+    () => String(selectedYear),
+    [selectedYear]
+  );
 
   /* Estado */
   const [loading, setLoading] = useState(false);
@@ -104,6 +113,9 @@ function AppCore() {
   const [ownerFilter, setOwnerFilter] = useState("ALL");
   const [searchTerm, setSearchTerm] = useState("");
   const [headerMonthOpen, setHeaderMonthOpen] = useState(false);
+
+  /* NUEVO: dropdown año */
+  const [headerYearOpen, setHeaderYearOpen] = useState(false);
 
   /* Historial */
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -177,7 +189,7 @@ function AppCore() {
     return () => unsub();
   }, []);
 
-  /* ===== UF base (alineado al último dato real) ===== */
+  /* ===== UF base ===== */
   useEffect(() => {
     (async () => {
       try {
@@ -185,44 +197,28 @@ function AppCore() {
         const json = await res.json();
         const serie = Array.isArray(json.serie) ? json.serie : [];
         if (serie.length) {
-          const ordered = [...serie].sort(
-            (a, b) => new Date(b.fecha) - new Date(a.fecha)
-          );
-          const latest = ordered[0];
-          const latestDate = new Date(latest.fecha);
-          const latestIso = latestDate.toISOString().slice(0, 10);
-          const latestVal = latest.valor;
-
-          setUfToday(latestVal);
-          setUfPast(ordered.slice(0, 15));
-
+          const todayVal = serie[0].valor;
+          setUfToday(todayVal);
+          setUfPast(serie.slice(0, 15));
           const next = [];
-          const base = latestDate;
+          const base = new Date(serie[0].fecha);
           for (let i = 1; i <= 15; i++) {
             const d = new Date(base);
             d.setDate(d.getDate() + i);
-            next.push({
-              fecha: d.toISOString(),
-              valor: latestVal,
-              estimado: true,
-            });
+            next.push({ fecha: d.toISOString(), valor: todayVal, estimado: true });
           }
           setUfFuture(next);
-
           const cache = {};
-          ordered.forEach((it) => {
+          serie.forEach((it) => {
             const iso = new Date(it.fecha).toISOString().slice(0, 10);
             cache[iso] = it.valor;
           });
           setUfCache((prev) => ({ ...prev, ...cache }));
-
-          // La calculadora se alinea al último dato disponible
-          setUfCalcDate(latestIso);
-          setUfCalcRate(latestVal);
+          const todayIso = new Date().toISOString().slice(0, 10);
+          setUfCalcDate(todayIso);
+          setUfCalcRate(cache[todayIso] ?? todayVal);
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     })();
   }, []);
 
@@ -393,7 +389,11 @@ function AppCore() {
     return () => unsub();
   }, [role]);
 
-  const computedHeaderTitle = viewMode === "YEAR" ? "INFORME ANUAL DE ARRIENDOS" : appTitle;
+  const computedHeaderTitle =
+    viewMode === "YEAR"
+      ? `INFORME ANUAL DE ARRIENDOS ${selectedYear}`
+      : appTitle;
+
   const modalResetKey = `${historyOwner}__${historyProperty}__${historyOpen ? 1 : 0}`;
 
   /* ===== Pantalla Login ===== */
@@ -452,39 +452,76 @@ function AppCore() {
             )}
           </div>
 
-          {/* SELECTOR DE MES + UF */}
+          {/* SELECTOR DE MES + (NUEVO) AÑO + UF */}
           <div className="header-controls" style={{ position: "relative" }}>
-            <div className="hc-group">
-              <button
-                className="btn btn-secondary hc-trigger"
-                onClick={() => setHeaderMonthOpen((v) => !v)}
-              >
-                {activeMonthLabel} ▾
-              </button>
-              {headerMonthOpen && (
-                <div className="hc-dropdown" style={{ zIndex: 60 }}>
-                  {monthList.map((m) => (
-                    <button
-                      key={m.id}
-                      className={m.id === selectedMonthId ? "hc-item active" : "hc-item"}
-                      onClick={() => {
-                        setSelectedMonthId(m.id);
-                        setHeaderMonthOpen(false);
-                      }}
-                    >
-                      {m.label.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            {/* Selector Mes (solo en mensual) */}
+            {viewMode === "MONTH" && (
+              <div className="hc-group">
+                <button
+                  className="btn btn-secondary hc-trigger"
+                  onClick={() => {
+                    setHeaderMonthOpen((v) => !v);
+                    setHeaderYearOpen(false);
+                  }}
+                >
+                  {activeMonthLabel} ▾
+                </button>
+                {headerMonthOpen && (
+                  <div className="hc-dropdown" style={{ zIndex: 60 }}>
+                    {monthList.map((m) => (
+                      <button
+                        key={m.id}
+                        className={m.id === selectedMonthId ? "hc-item active" : "hc-item"}
+                        onClick={() => {
+                          setSelectedMonthId(m.id);
+                          setHeaderMonthOpen(false);
+                        }}
+                      >
+                        {m.label.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* NUEVO: Selector Año (solo en anual) */}
+            {viewMode === "YEAR" && (
+              <div className="hc-group">
+                <button
+                  className="btn btn-secondary hc-trigger"
+                  onClick={() => {
+                    setHeaderYearOpen((v) => !v);
+                    setHeaderMonthOpen(false);
+                  }}
+                >
+                  AÑO {activeYearLabel} ▾
+                </button>
+                {headerYearOpen && (
+                  <div className="hc-dropdown" style={{ zIndex: 60 }}>
+                    {yearOptions.map((y) => (
+                      <button
+                        key={y}
+                        className={y === selectedYear ? "hc-item active" : "hc-item"}
+                        onClick={() => {
+                          setSelectedYear(y);
+                          setHeaderYearOpen(false);
+                        }}
+                      >
+                        {String(y)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <button className="btn btn-secondary" onClick={() => setUfModalOpen(true)}>
               VALOR UF: {ufToday != null ? moneyCLP2(ufToday) : "$---,--"}
             </button>
           </div>
 
-          {/* ACCIONES AGRUPADAS */}
+          {/* ACCIONES - AGRUPADAS IZQ / DER */}
           <div className="actions-bar">
             <div className="actions-left">
               <button
@@ -493,8 +530,11 @@ function AppCore() {
                   if (viewMode === "MONTH") {
                     setViewMode("YEAR");
                     setHeaderMonthOpen(false);
+                    setHeaderYearOpen(false);
+                    setSelectedYear(selYear); // toma el año del mes actual seleccionado
                   } else {
                     setViewMode("MONTH");
+                    setHeaderYearOpen(false);
                   }
                 }}
               >
@@ -558,10 +598,7 @@ function AppCore() {
             </div>
 
             <div className="actions-right">
-              <button
-                className={messagesUnread ? "btn with-dot" : "btn"}
-                onClick={() => setMessagesOpen(true)}
-              >
+              <button className={messagesUnread ? "btn with-dot" : "btn"} onClick={() => setMessagesOpen(true)}>
                 MENSAJES
               </button>
 
@@ -593,21 +630,9 @@ function AppCore() {
                   onClick={async () => {
                     setSaving(true);
                     try {
-                      await setDoc(
-                        doc(db, "rents", selectedMonthId),
-                        dataCurrent || {},
-                        { merge: true }
-                      );
-                      await setDoc(
-                        doc(db, "structure", "owners"),
-                        { owners: owners || [] },
-                        { merge: true }
-                      );
-                      await setDoc(
-                        doc(db, "meta", "app"),
-                        { appTitle: appTitle || "INFORME MENSUAL DE ARRIENDOS" },
-                        { merge: true }
-                      );
+                      await setDoc(doc(db, "rents", selectedMonthId), dataCurrent || {}, { merge: true });
+                      await setDoc(doc(db, "structure", "owners"), { owners: owners || [] }, { merge: true });
+                      await setDoc(doc(db, "meta", "app"), { appTitle: appTitle || "INFORME MENSUAL DE ARRIENDOS" }, { merge: true });
                       setToast("CAMBIOS GUARDADOS", "success");
                       setEditing(false);
                     } catch (e) {
@@ -621,13 +646,7 @@ function AppCore() {
                 </button>
               )}
 
-              <button
-                className="btn"
-                onClick={() => {
-                  setRole(null);
-                  setEditing(false);
-                }}
-              >
+              <button className="btn" onClick={() => { setRole(null); setEditing(false); }}>
                 SALIR
               </button>
             </div>
@@ -668,7 +687,7 @@ function AppCore() {
             </div>
           </div>
 
-          {/* Grilla mensual */}
+          {/* Grilla mensual / anual */}
           {viewMode === "MONTH" ? (
             (owners || [])
               .filter((o) => ownerFilter === "ALL" || o.name === ownerFilter)
@@ -817,7 +836,9 @@ function AppCore() {
                 <div className="owner-title"><span>RESUMEN ANUAL</span></div>
                 <div className="owner-total">TOTAL: {moneyCLP0(totalGeneralYear)}</div>
               </div>
-              <div className="annual-note">SELECCIONA AÑO EN EL HEADER</div>
+              <div className="annual-note">
+                CAMBIA EL AÑO EN EL HEADER PARA VER OTRO RESUMEN
+              </div>
             </div>
           )}
         </div>
@@ -861,8 +882,10 @@ function AppCore() {
                           {(() => {
                             const d = new Date(it.fecha);
                             if (isNaN(d)) return it.fecha;
-                            const iso = d.toISOString().slice(0, 10);
-                            return formatIsoToDDMMYYYY(iso);
+                            const dd = String(d.getDate()).padStart(2, "0");
+                            const mm = String(d.getMonth() + 1).padStart(2, "0");
+                            const yyyy = d.getFullYear();
+                            return `${dd}-${mm}-${yyyy}`;
                           })()}
                         </span>
                         <span>{moneyCLP2(it.valor)} {it.estimado ? "(EST.)" : ""}</span>
@@ -896,24 +919,11 @@ function AppCore() {
                       value={ufCalcUF}
                       onChange={(e) => setUfCalcUF(e.target.value)}
                       onBlur={() => {
-                        const n = parseFloat(
-                          ufCalcUF.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".")
-                        );
+                        const n = parseFloat(ufCalcUF.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", "."));
                         if (!isNaN(n) && ufCalcRate) {
                           const pesos = Math.round(n * ufCalcRate * 100) / 100;
-                          setUfCalcUF(
-                            new Intl.NumberFormat("es-CL", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            }).format(n) + " UF"
-                          );
-                          setUfCalcCLP(
-                            new Intl.NumberFormat("es-CL", {
-                              style: "currency",
-                              currency: "CLP",
-                              minimumFractionDigits: 2,
-                            }).format(pesos)
-                          );
+                          setUfCalcUF(new Intl.NumberFormat("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n) + " UF");
+                          setUfCalcCLP(new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", minimumFractionDigits: 2 }).format(pesos));
                         }
                       }}
                     />
@@ -926,24 +936,11 @@ function AppCore() {
                       value={ufCalcCLP}
                       onChange={(e) => setUfCalcCLP(e.target.value)}
                       onBlur={() => {
-                        const n = parseFloat(
-                          ufCalcCLP.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".")
-                        );
+                        const n = parseFloat(ufCalcCLP.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", "."));
                         if (!isNaN(n) && ufCalcRate) {
                           const uf = n / ufCalcRate;
-                          setUfCalcCLP(
-                            new Intl.NumberFormat("es-CL", {
-                              style: "currency",
-                              currency: "CLP",
-                              minimumFractionDigits: 2,
-                            }).format(n)
-                          );
-                          setUfCalcUF(
-                            new Intl.NumberFormat("es-CL", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            }).format(uf) + " UF"
-                          );
+                          setUfCalcCLP(new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", minimumFractionDigits: 2 }).format(n));
+                          setUfCalcUF(new Intl.NumberFormat("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(uf) + " UF");
                         }
                       }}
                     />
@@ -951,9 +948,14 @@ function AppCore() {
                 </div>
 
                 <div className="uf-rate-note">
-                  {ufCalcRate
-                    ? `UF DEL ${formatIsoToDDMMYYYY(ufCalcDate)}: ${moneyCLP2(ufCalcRate)}`
-                    : "SELECCIONE UNA FECHA"}
+                  {ufCalcRate ? `UF DEL ${(() => {
+                    const d = new Date(ufCalcDate);
+                    if (isNaN(d)) return ufCalcDate;
+                    const dd = String(d.getDate()).padStart(2, "0");
+                    const mm = String(d.getMonth() + 1).padStart(2, "0");
+                    const yyyy = d.getFullYear();
+                    return `${dd}-${mm}-${yyyy}`;
+                  })()}: ${moneyCLP2(ufCalcRate)}` : "SELECCIONE UNA FECHA"}
                 </div>
               </div>
             </div>
@@ -973,8 +975,7 @@ function AppCore() {
               <ul className="totals-list">
                 {(owners || []).map((o) => {
                   const ok = pickKeyCI(dataCurrent, o.name);
-                  const od =
-                    viewMode === "MONTH" ? (ok ? dataCurrent[ok] : {}) : (dataAnnual[o.name] || {});
+                  const od = viewMode === "MONTH" ? (ok ? dataCurrent[ok] : {}) : (dataAnnual[o.name] || {});
                   const total = (o.properties || []).reduce((s, p) => {
                     if (viewMode === "MONTH") {
                       const pk = pickKeyCI(od, p);
@@ -992,10 +993,7 @@ function AppCore() {
                 })}
               </ul>
               <div className="totals-footer">
-                <div>
-                  TOTAL GENERAL:{" "}
-                  {moneyCLP0(viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear)}
-                </div>
+                <div>TOTAL GENERAL: {moneyCLP0(viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear)}</div>
               </div>
             </div>
           </div>
@@ -1024,9 +1022,7 @@ function AppCore() {
                   <ul className="missing-list">
                     {list.map((it, idx) => (
                       <li key={idx} className="missing-item">
-                        <span>
-                          {it.owner} / {it.property}
-                        </span>
+                        <span>{it.owner} / {it.property}</span>
                         <button
                           className="btn btn-secondary btn-sm"
                           onClick={() => {
@@ -1069,13 +1065,10 @@ function AppCore() {
           onClose={() => setMessagesOpen(false)}
           onMarkedSeen={async () => {
             try {
-              await setDoc(
-                doc(db, "meta", "messages"),
-                role === "admin"
-                  ? { unreadForAdmin: false, lastSeenAdmin: serverTimestamp() }
-                  : { unreadForViewer: false, lastSeenViewer: serverTimestamp() },
-                { merge: true }
-              );
+              await setDoc(doc(db, "meta", "messages"),
+                role === "admin" ? { unreadForAdmin: false, lastSeenAdmin: serverTimestamp() } :
+                                   { unreadForViewer: false, lastSeenViewer: serverTimestamp() },
+               { merge: true });
               setMessagesUnread(false);
             } catch {}
           }}

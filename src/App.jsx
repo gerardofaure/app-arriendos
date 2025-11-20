@@ -58,6 +58,22 @@ const pickKeyCI = (obj, targetName) => {
   return null;
 };
 
+/* ===== UF helper: usar fecha real del API, sin UTC shift ===== */
+const dateKeyFromApi = (fechaStr) => {
+  if (!fechaStr) return "";
+  return String(fechaStr).slice(0, 10); // YYYY-MM-DD
+};
+
+const fmtDDMMYYYY = (isoDate) => {
+  if (!isoDate) return "";
+  const d = new Date(isoDate + "T00:00:00");
+  if (isNaN(d)) return isoDate;
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+};
+
 /* ===== App ===== */
 function AppCore() {
   /* Login */
@@ -72,7 +88,7 @@ function AppCore() {
   const todayId = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   const [selectedMonthId, setSelectedMonthId] = useState(todayId);
   const [selectedYear, setSelectedYear] = useState(today.getFullYear());
-  const { year: selYear, month, monthName } = monthIdToParts(selectedMonthId);
+  const { year: selYear, monthName } = monthIdToParts(selectedMonthId);
 
   const activeMonthLabel = useMemo(() => {
     const f = monthList.find((m) => m.id === selectedMonthId);
@@ -84,10 +100,9 @@ function AppCore() {
     [selectedMonthId]
   );
 
-  /* NUEVO: opciones de año para selector */
+  /* Selector años */
   const yearOptions = useMemo(() => {
     const y = new Date().getFullYear();
-    // últimos 6 años (ajustable)
     return Array.from({ length: 6 }, (_, i) => y - i);
   }, []);
   const activeYearLabel = useMemo(
@@ -113,8 +128,6 @@ function AppCore() {
   const [ownerFilter, setOwnerFilter] = useState("ALL");
   const [searchTerm, setSearchTerm] = useState("");
   const [headerMonthOpen, setHeaderMonthOpen] = useState(false);
-
-  /* NUEVO: dropdown año */
   const [headerYearOpen, setHeaderYearOpen] = useState(false);
 
   /* Historial */
@@ -136,6 +149,7 @@ function AppCore() {
   const [ufCache, setUfCache] = useState({});
   const [ufCalcDate, setUfCalcDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [ufCalcRate, setUfCalcRate] = useState(null);
+  const [ufCalcEffectiveDate, setUfCalcEffectiveDate] = useState(null);
   const [ufCalcUF, setUfCalcUF] = useState("");
   const [ufCalcCLP, setUfCalcCLP] = useState("");
 
@@ -189,7 +203,7 @@ function AppCore() {
     return () => unsub();
   }, []);
 
-  /* ===== UF base ===== */
+  /* ===== UF base (con fallback correcto) ===== */
   useEffect(() => {
     (async () => {
       try {
@@ -197,49 +211,90 @@ function AppCore() {
         const json = await res.json();
         const serie = Array.isArray(json.serie) ? json.serie : [];
         if (serie.length) {
-          const todayVal = serie[0].valor;
-          setUfToday(todayVal);
+          const latestVal = serie[0].valor;
+          const latestKey = dateKeyFromApi(serie[0].fecha);
+
+          setUfToday(latestVal);
           setUfPast(serie.slice(0, 15));
+
+          // Próximos 15 días estimados
           const next = [];
           const base = new Date(serie[0].fecha);
           for (let i = 1; i <= 15; i++) {
             const d = new Date(base);
             d.setDate(d.getDate() + i);
-            next.push({ fecha: d.toISOString(), valor: todayVal, estimado: true });
+            next.push({ fecha: d.toISOString(), valor: latestVal, estimado: true });
           }
           setUfFuture(next);
+
+          // Cache por fecha REAL del API
           const cache = {};
           serie.forEach((it) => {
-            const iso = new Date(it.fecha).toISOString().slice(0, 10);
-            cache[iso] = it.valor;
+            const key = dateKeyFromApi(it.fecha);
+            if (key) cache[key] = it.valor;
           });
-          setUfCache((prev) => ({ ...prev, ...cache }));
+
           const todayIso = new Date().toISOString().slice(0, 10);
+
+          // ✅ Si HOY no viene en el API, igual lo mapeo al último valor disponible (UF vigente)
+          if (cache[todayIso] == null && latestVal != null) {
+            cache[todayIso] = latestVal;
+          }
+
+          setUfCache((prev) => ({ ...prev, ...cache }));
           setUfCalcDate(todayIso);
-          setUfCalcRate(cache[todayIso] ?? todayVal);
+          setUfCalcRate(cache[todayIso] ?? latestVal);
+          setUfCalcEffectiveDate(todayIso);
         }
       } catch {}
     })();
   }, []);
 
-  const getUfForDate = async (isoDate) => {
-    if (!isoDate) return null;
-    if (ufCache[isoDate] != null) return ufCache[isoDate];
+  // Devuelve UF exacta o la última disponible anterior
+  const pickUfWithFallback = async (isoDate) => {
+    if (!isoDate) return { rate: null, effectiveDate: null };
+
+    // 1) exacta
+    if (ufCache[isoDate] != null) {
+      return { rate: ufCache[isoDate], effectiveDate: isoDate };
+    }
+
+    // 2) fallback al último día anterior presente en cache
+    const prevDates = Object.keys(ufCache)
+      .filter((k) => k <= isoDate)
+      .sort();
+    if (prevDates.length) {
+      const eff = prevDates[prevDates.length - 1];
+      return { rate: ufCache[eff], effectiveDate: eff };
+    }
+
+    // 3) si no hay nada, fetch anual y reintentar
     try {
       const year = isoDate.slice(0, 4);
       const res = await fetch(`https://mindicador.cl/api/uf/${year}`);
       const json = await res.json();
       const arr = Array.isArray(json.serie) ? json.serie : [];
+
       const map = {};
       arr.forEach((it) => {
-        const iso = new Date(it.fecha).toISOString().slice(0, 10);
-        map[iso] = it.valor;
+        const key = dateKeyFromApi(it.fecha);
+        if (key) map[key] = it.valor;
       });
+
       setUfCache((prev) => ({ ...prev, ...map }));
-      return map[isoDate] ?? null;
-    } catch {
-      return null;
-    }
+
+      if (map[isoDate] != null) {
+        return { rate: map[isoDate], effectiveDate: isoDate };
+      }
+
+      const prev2 = Object.keys(map).filter((k) => k <= isoDate).sort();
+      if (prev2.length) {
+        const eff = prev2[prev2.length - 1];
+        return { rate: map[eff], effectiveDate: eff };
+      }
+    } catch {}
+
+    return { rate: null, effectiveDate: null };
   };
 
   /* ===== Lectura mensual ===== */
@@ -345,7 +400,6 @@ function AppCore() {
       setHistoryOpen(true);
       setHistoryLoading(true);
 
-      // últimos 6 meses desde el seleccionado
       const ids = [];
       let id = selectedMonthId;
       for (let i = 0; i < 6; i++) {
@@ -366,8 +420,6 @@ function AppCore() {
         rows.push({ monthId: mid, monthLabel: `${mname.toUpperCase()} ${yy}`, value: val });
       }
       setHistoryData(rows);
-
-      // contrato
       setContractData(resolveContract(ownerName, propertyName));
     } catch {
       setHistoryData([]);
@@ -452,9 +504,8 @@ function AppCore() {
             )}
           </div>
 
-          {/* SELECTOR DE MES + (NUEVO) AÑO + UF */}
+          {/* SELECTOR DE MES + AÑO + UF */}
           <div className="header-controls" style={{ position: "relative" }}>
-            {/* Selector Mes (solo en mensual) */}
             {viewMode === "MONTH" && (
               <div className="hc-group">
                 <button
@@ -485,7 +536,6 @@ function AppCore() {
               </div>
             )}
 
-            {/* NUEVO: Selector Año (solo en anual) */}
             {viewMode === "YEAR" && (
               <div className="hc-group">
                 <button
@@ -521,7 +571,7 @@ function AppCore() {
             </button>
           </div>
 
-          {/* ACCIONES - AGRUPADAS IZQ / DER */}
+          {/* ACCIONES */}
           <div className="actions-bar">
             <div className="actions-left">
               <button
@@ -531,7 +581,7 @@ function AppCore() {
                     setViewMode("YEAR");
                     setHeaderMonthOpen(false);
                     setHeaderYearOpen(false);
-                    setSelectedYear(selYear); // toma el año del mes actual seleccionado
+                    setSelectedYear(selYear);
                   } else {
                     setViewMode("MONTH");
                     setHeaderYearOpen(false);
@@ -905,8 +955,9 @@ function AppCore() {
                   onChange={async (e) => {
                     const iso = e.target.value;
                     setUfCalcDate(iso);
-                    const rate = await getUfForDate(iso);
+                    const { rate, effectiveDate } = await pickUfWithFallback(iso);
                     setUfCalcRate(rate);
+                    setUfCalcEffectiveDate(effectiveDate);
                   }}
                 />
 
@@ -948,14 +999,11 @@ function AppCore() {
                 </div>
 
                 <div className="uf-rate-note">
-                  {ufCalcRate ? `UF DEL ${(() => {
-                    const d = new Date(ufCalcDate);
-                    if (isNaN(d)) return ufCalcDate;
-                    const dd = String(d.getDate()).padStart(2, "0");
-                    const mm = String(d.getMonth() + 1).padStart(2, "0");
-                    const yyyy = d.getFullYear();
-                    return `${dd}-${mm}-${yyyy}`;
-                  })()}: ${moneyCLP2(ufCalcRate)}` : "SELECCIONE UNA FECHA"}
+                  {ufCalcRate ? (() => {
+                    const eff = ufCalcEffectiveDate || ufCalcDate;
+                    const diff = ufCalcEffectiveDate && ufCalcEffectiveDate !== ufCalcDate;
+                    return `UF DEL ${fmtDDMMYYYY(eff)}: ${moneyCLP2(ufCalcRate)}${diff ? " (ÚLTIMO DISP.)" : ""}`;
+                  })() : "SELECCIONE UNA FECHA"}
                 </div>
               </div>
             </div>

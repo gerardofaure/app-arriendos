@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import OwnerGroup from "./components/OwnerGroup.jsx";
 import PropertyHistoryModal from "./components/PropertyHistoryModal.jsx";
 import MessagesModal from "./components/MessagesModal.jsx";
@@ -43,7 +43,6 @@ const normId = (s) =>
   String(s || "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 
@@ -56,22 +55,6 @@ const pickKeyCI = (obj, targetName) => {
     if (norm(k) === want) return k;
   }
   return null;
-};
-
-/* ===== UF helper: usar fecha real del API, sin UTC shift ===== */
-const dateKeyFromApi = (fechaStr) => {
-  if (!fechaStr) return "";
-  return String(fechaStr).slice(0, 10); // YYYY-MM-DD
-};
-
-const fmtDDMMYYYY = (isoDate) => {
-  if (!isoDate) return "";
-  const d = new Date(isoDate + "T00:00:00");
-  if (isNaN(d)) return isoDate;
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}-${mm}-${yyyy}`;
 };
 
 /* ===== App ===== */
@@ -89,26 +72,11 @@ function AppCore() {
   const [selectedMonthId, setSelectedMonthId] = useState(todayId);
   const [selectedYear, setSelectedYear] = useState(today.getFullYear());
   const { year: selYear, monthName } = monthIdToParts(selectedMonthId);
-
   const activeMonthLabel = useMemo(() => {
     const f = monthList.find((m) => m.id === selectedMonthId);
     return (f ? f.label : `${monthName} ${selYear}`).toUpperCase();
   }, [monthList, selectedMonthId, monthName, selYear]);
-
-  const selectedMonthNumber = useMemo(
-    () => Number(selectedMonthId.slice(5, 7)),
-    [selectedMonthId]
-  );
-
-  /* Selector años */
-  const yearOptions = useMemo(() => {
-    const y = new Date().getFullYear();
-    return Array.from({ length: 6 }, (_, i) => y - i);
-  }, []);
-  const activeYearLabel = useMemo(
-    () => String(selectedYear),
-    [selectedYear]
-  );
+  const selectedMonthNumber = useMemo(() => Number(selectedMonthId.slice(5, 7)), [selectedMonthId]);
 
   /* Estado */
   const [loading, setLoading] = useState(false);
@@ -126,9 +94,13 @@ function AppCore() {
 
   /* Filtros/UI */
   const [ownerFilter, setOwnerFilter] = useState("ALL");
-  const [searchTerm, setSearchTerm] = useState("");
+
+  /* Dropdowns: refs + estado */
   const [headerMonthOpen, setHeaderMonthOpen] = useState(false);
-  const [headerYearOpen, setHeaderYearOpen] = useState(false);
+  const monthRef = useRef(null);
+
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsRef = useRef(null);
 
   /* Historial */
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -149,7 +121,6 @@ function AppCore() {
   const [ufCache, setUfCache] = useState({});
   const [ufCalcDate, setUfCalcDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [ufCalcRate, setUfCalcRate] = useState(null);
-  const [ufCalcEffectiveDate, setUfCalcEffectiveDate] = useState(null);
   const [ufCalcUF, setUfCalcUF] = useState("");
   const [ufCalcCLP, setUfCalcCLP] = useState("");
 
@@ -160,13 +131,37 @@ function AppCore() {
   const [messagesUnread, setMessagesUnread] = useState(false);
   const [showReajustesModal, setShowReajustesModal] = useState(false);
 
-  /* ===== Toasters ===== */
   const showToast = (m, t = "info") => {
     setToast({ show: true, message: m, type: t });
     setTimeout(() => setToast((s) => ({ ...s, show: false })), 3200);
   };
 
-  /* ===== Meta & estructura ===== */
+  /* Cierre automático de dropdowns: click fuera + ESC */
+  useEffect(() => {
+    const onDown = (e) => {
+      const target = e.target;
+      if (headerMonthOpen && monthRef.current && !monthRef.current.contains(target)) {
+        setHeaderMonthOpen(false);
+      }
+      if (optionsOpen && optionsRef.current && !optionsRef.current.contains(target)) {
+        setOptionsOpen(false);
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        setHeaderMonthOpen(false);
+        setOptionsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keyup", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keyup", onKey);
+    };
+  }, [headerMonthOpen, optionsOpen]);
+
+  /* Meta & estructura */
   useEffect(() => {
     (async () => {
       try {
@@ -191,7 +186,7 @@ function AppCore() {
     })();
   }, []);
 
-  /* ===== Contracts realtime ===== */
+  /* Contracts realtime */
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "contracts"), (snap) => {
       const map = {};
@@ -203,7 +198,7 @@ function AppCore() {
     return () => unsub();
   }, []);
 
-  /* ===== UF base (con fallback correcto) ===== */
+  /* UF base */
   useEffect(() => {
     (async () => {
       try {
@@ -211,93 +206,52 @@ function AppCore() {
         const json = await res.json();
         const serie = Array.isArray(json.serie) ? json.serie : [];
         if (serie.length) {
-          const latestVal = serie[0].valor;
-          const latestKey = dateKeyFromApi(serie[0].fecha);
-
-          setUfToday(latestVal);
+          const todayVal = serie[0].valor;
+          setUfToday(todayVal);
           setUfPast(serie.slice(0, 15));
-
-          // Próximos 15 días estimados
           const next = [];
           const base = new Date(serie[0].fecha);
           for (let i = 1; i <= 15; i++) {
             const d = new Date(base);
             d.setDate(d.getDate() + i);
-            next.push({ fecha: d.toISOString(), valor: latestVal, estimado: true });
+            next.push({ fecha: d.toISOString(), valor: todayVal, estimado: true });
           }
           setUfFuture(next);
-
-          // Cache por fecha REAL del API
           const cache = {};
           serie.forEach((it) => {
-            const key = dateKeyFromApi(it.fecha);
-            if (key) cache[key] = it.valor;
+            const iso = new Date(it.fecha).toISOString().slice(0, 10);
+            cache[iso] = it.valor;
           });
-
-          const todayIso = new Date().toISOString().slice(0, 10);
-
-          // ✅ Si HOY no viene en el API, igual lo mapeo al último valor disponible (UF vigente)
-          if (cache[todayIso] == null && latestVal != null) {
-            cache[todayIso] = latestVal;
-          }
-
           setUfCache((prev) => ({ ...prev, ...cache }));
+          const todayIso = new Date().toISOString().slice(0, 10);
           setUfCalcDate(todayIso);
-          setUfCalcRate(cache[todayIso] ?? latestVal);
-          setUfCalcEffectiveDate(todayIso);
+          setUfCalcRate(cache[todayIso] ?? todayVal);
         }
       } catch {}
     })();
   }, []);
 
-  // Devuelve UF exacta o la última disponible anterior
-  const pickUfWithFallback = async (isoDate) => {
-    if (!isoDate) return { rate: null, effectiveDate: null };
-
-    // 1) exacta
-    if (ufCache[isoDate] != null) {
-      return { rate: ufCache[isoDate], effectiveDate: isoDate };
-    }
-
-    // 2) fallback al último día anterior presente en cache
-    const prevDates = Object.keys(ufCache)
-      .filter((k) => k <= isoDate)
-      .sort();
-    if (prevDates.length) {
-      const eff = prevDates[prevDates.length - 1];
-      return { rate: ufCache[eff], effectiveDate: eff };
-    }
-
-    // 3) si no hay nada, fetch anual y reintentar
+  const getUfForDate = async (isoDate) => {
+    if (!isoDate) return null;
+    if (ufCache[isoDate] != null) return ufCache[isoDate];
     try {
       const year = isoDate.slice(0, 4);
       const res = await fetch(`https://mindicador.cl/api/uf/${year}`);
       const json = await res.json();
       const arr = Array.isArray(json.serie) ? json.serie : [];
-
       const map = {};
       arr.forEach((it) => {
-        const key = dateKeyFromApi(it.fecha);
-        if (key) map[key] = it.valor;
+        const iso = new Date(it.fecha).toISOString().slice(0, 10);
+        map[iso] = it.valor;
       });
-
       setUfCache((prev) => ({ ...prev, ...map }));
-
-      if (map[isoDate] != null) {
-        return { rate: map[isoDate], effectiveDate: isoDate };
-      }
-
-      const prev2 = Object.keys(map).filter((k) => k <= isoDate).sort();
-      if (prev2.length) {
-        const eff = prev2[prev2.length - 1];
-        return { rate: map[eff], effectiveDate: eff };
-      }
-    } catch {}
-
-    return { rate: null, effectiveDate: null };
+      return map[isoDate] ?? null;
+    } catch {
+      return null;
+    }
   };
 
-  /* ===== Lectura mensual ===== */
+  /* Lectura mensual */
   useEffect(() => {
     if (viewMode !== "MONTH") return;
     (async () => {
@@ -318,7 +272,7 @@ function AppCore() {
     })();
   }, [selectedMonthId, viewMode]);
 
-  /* ===== Lectura anual ===== */
+  /* Lectura anual */
   useEffect(() => {
     if (viewMode !== "YEAR") return;
     (async () => {
@@ -355,7 +309,7 @@ function AppCore() {
     })();
   }, [viewMode, selectedYear, owners]);
 
-  /* ===== Totales ===== */
+  /* Totales */
   const totalGeneralMonth = useMemo(
     () =>
       (owners || []).reduce((acc, o) => {
@@ -378,7 +332,7 @@ function AppCore() {
     [owners, dataAnnual]
   );
 
-  /* ===== Resolver contrato robusto ===== */
+  /* Resolver contrato */
   const resolveContract = (ownerName, propertyName) => {
     if (!ownerName || !propertyName) return null;
     const idCanon = canonicalDocId(ownerName, propertyName);
@@ -392,7 +346,7 @@ function AppCore() {
     return hit || null;
   };
 
-  /* ===== Abrir historial ===== */
+  /* Abrir historial */
   const handleOpenHistory = async (ownerName, propertyName) => {
     try {
       setHistoryOwner(ownerName);
@@ -400,6 +354,7 @@ function AppCore() {
       setHistoryOpen(true);
       setHistoryLoading(true);
 
+      // últimos 6 desde el seleccionado
       const ids = [];
       let id = selectedMonthId;
       for (let i = 0; i < 6; i++) {
@@ -420,6 +375,8 @@ function AppCore() {
         rows.push({ monthId: mid, monthLabel: `${mname.toUpperCase()} ${yy}`, value: val });
       }
       setHistoryData(rows);
+
+      // contrato
       setContractData(resolveContract(ownerName, propertyName));
     } catch {
       setHistoryData([]);
@@ -430,7 +387,7 @@ function AppCore() {
     }
   };
 
-  /* ===== Mensajes: unread flag ===== */
+  /* Mensajes: unread flag */
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "meta", "messages"), (snap) => {
       const d = snap.data();
@@ -441,14 +398,10 @@ function AppCore() {
     return () => unsub();
   }, [role]);
 
-  const computedHeaderTitle =
-    viewMode === "YEAR"
-      ? `INFORME ANUAL DE ARRIENDOS ${selectedYear}`
-      : appTitle;
-
+  const computedHeaderTitle = viewMode === "YEAR" ? "INFORME ANUAL DE ARRIENDOS" : appTitle;
   const modalResetKey = `${historyOwner}__${historyProperty}__${historyOpen ? 1 : 0}`;
 
-  /* ===== Pantalla Login ===== */
+  /* Login */
   const handleLogin = (e) => {
     e.preventDefault();
     const u = (loginUser || "").toLowerCase().trim();
@@ -460,6 +413,53 @@ function AppCore() {
     } else {
       setLoginError("USUARIO O CONTRASEÑA INCORRECTOS");
     }
+  };
+
+  /* Exportar Excel (para el menú) */
+  const handleExportExcel = () => {
+    const title =
+      viewMode === "MONTH"
+        ? `ARRIENDOS ${activeMonthLabel}`
+        : `ARRIENDOS AÑO ${selectedYear}`;
+    let html = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head><meta charset="UTF-8" /><title>${title}</title>
+      <style>table{border-collapse:collapse}th,td{border:1px solid #777;padding:4px 6px}th{background:#0f172a;color:#fff}.num{mso-number-format:"\\$ #,##0";text-align:right}</style>
+      </head><body><h2>${title}</h2><table><tr><th>PROPIEDAD</th><th>PROPIETARIO</th><th>MONTO</th></tr>`;
+    const source =
+      viewMode === "MONTH"
+        ? (owners || []).flatMap((o) => {
+            const ok = pickKeyCI(dataCurrent, o.name);
+            const od = ok ? dataCurrent[ok] : {};
+            return (o.properties || []).map((p) => {
+              const pk = pickKeyCI(od, p);
+              const val = pk ? Number(od[pk] || 0) : 0;
+              return { prop: p, owner: o.name, val };
+            });
+          })
+        : (owners || []).flatMap((o) =>
+            (o.properties || []).map((p) => ({
+              prop: p,
+              owner: o.name,
+              val: (dataAnnual[o.name] || {})[p]
+                ? Number((dataAnnual[o.name] || {})[p])
+                : 0,
+            }))
+          );
+    source.forEach((r) => {
+      html += `<tr><td>${r.prop}</td><td>${r.owner}</td><td class="num">${r.val}</td></tr>`;
+    });
+    html += `</table></body></html>`;
+    const blob = new Blob([html], { type: "application/vnd.ms-excel" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download =
+      viewMode === "MONTH"
+        ? `arriendos-${selectedMonthId}.xls`
+        : `arriendos-${selectedYear}.xls`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   if (!role) {
@@ -483,7 +483,6 @@ function AppCore() {
     );
   }
 
-  /* ===== UI ===== */
   return (
     <div className="app-shell dark">
       {(loading || saving) && (
@@ -500,71 +499,38 @@ function AppCore() {
             {role === "admin" && editing ? (
               <input className="app-title-input" value={appTitle} onChange={(e) => setAppTitle(e.target.value)} />
             ) : (
-              <div className="header-title">{computedHeaderTitle}</div>
+              <div className="header-title">
+                {viewMode === "YEAR" ? "INFORME ANUAL DE ARRIENDOS" : appTitle}
+              </div>
             )}
           </div>
 
-          {/* SELECTOR DE MES + AÑO + UF */}
+          {/* SELECTOR DE MES + UF */}
           <div className="header-controls" style={{ position: "relative" }}>
-            {viewMode === "MONTH" && (
-              <div className="hc-group">
-                <button
-                  className="btn btn-secondary hc-trigger"
-                  onClick={() => {
-                    setHeaderMonthOpen((v) => !v);
-                    setHeaderYearOpen(false);
-                  }}
-                >
-                  {activeMonthLabel} ▾
-                </button>
-                {headerMonthOpen && (
-                  <div className="hc-dropdown" style={{ zIndex: 60 }}>
-                    {monthList.map((m) => (
-                      <button
-                        key={m.id}
-                        className={m.id === selectedMonthId ? "hc-item active" : "hc-item"}
-                        onClick={() => {
-                          setSelectedMonthId(m.id);
-                          setHeaderMonthOpen(false);
-                        }}
-                      >
-                        {m.label.toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {viewMode === "YEAR" && (
-              <div className="hc-group">
-                <button
-                  className="btn btn-secondary hc-trigger"
-                  onClick={() => {
-                    setHeaderYearOpen((v) => !v);
-                    setHeaderMonthOpen(false);
-                  }}
-                >
-                  AÑO {activeYearLabel} ▾
-                </button>
-                {headerYearOpen && (
-                  <div className="hc-dropdown" style={{ zIndex: 60 }}>
-                    {yearOptions.map((y) => (
-                      <button
-                        key={y}
-                        className={y === selectedYear ? "hc-item active" : "hc-item"}
-                        onClick={() => {
-                          setSelectedYear(y);
-                          setHeaderYearOpen(false);
-                        }}
-                      >
-                        {String(y)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+            <div className="hc-group" ref={monthRef}>
+              <button
+                className="btn btn-secondary hc-trigger"
+                onClick={() => setHeaderMonthOpen((v) => !v)}
+              >
+                {activeMonthLabel} ▾
+              </button>
+              {headerMonthOpen && (
+                <div className="hc-dropdown" style={{ zIndex: 60 }}>
+                  {monthList.map((m) => (
+                    <button
+                      key={m.id}
+                      className={m.id === selectedMonthId ? "hc-item active" : "hc-item"}
+                      onClick={() => {
+                        setSelectedMonthId(m.id);
+                        setHeaderMonthOpen(false);
+                      }}
+                    >
+                      {m.label.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <button className="btn btn-secondary" onClick={() => setUfModalOpen(true)}>
               VALOR UF: {ufToday != null ? moneyCLP2(ufToday) : "$---,--"}
@@ -573,139 +539,128 @@ function AppCore() {
 
           {/* ACCIONES */}
           <div className="actions-bar">
-            <div className="actions-left">
+            {/* Menú OPCIONES con cierre al hacer click fuera */}
+            <div className="hc-group" ref={optionsRef}>
               <button
-                className="btn"
-                onClick={() => {
-                  if (viewMode === "MONTH") {
-                    setViewMode("YEAR");
-                    setHeaderMonthOpen(false);
-                    setHeaderYearOpen(false);
-                    setSelectedYear(selYear);
-                  } else {
-                    setViewMode("MONTH");
-                    setHeaderYearOpen(false);
-                  }
-                }}
+                className="btn hc-trigger"
+                onClick={() => setOptionsOpen((s) => !s)}
               >
-                {viewMode === "MONTH" ? "INFO ANUAL" : "VOLVER A MENSUAL"}
+                OPCIONES ▾
               </button>
+              {optionsOpen && (
+                <div className="hc-dropdown" style={{ zIndex: 60 }}>
+                  <button
+                    className="hc-item"
+                    onClick={() => {
+                      if (viewMode === "MONTH") {
+                        setViewMode("YEAR");
+                        setHeaderMonthOpen(false);
+                      } else {
+                        setViewMode("MONTH");
+                      }
+                      setOptionsOpen(false);
+                    }}
+                  >
+                    {viewMode === "MONTH" ? "INFO ANUAL" : "VOLVER A MENSUAL"}
+                  </button>
 
-              <button
-                className="btn"
-                onClick={() => {
-                  const title =
-                    viewMode === "MONTH"
-                      ? `ARRIENDOS ${activeMonthLabel}`
-                      : `ARRIENDOS AÑO ${selectedYear}`;
-                  let html = `
-                    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-                    <head><meta charset="UTF-8" /><title>${title}</title>
-                    <style>table{border-collapse:collapse}th,td{border:1px solid #777;padding:4px 6px}th{background:#0f172a;color:#fff}.num{mso-number-format:"\\$ #,##0";text-align:right}</style>
-                    </head><body><h2>${title}</h2><table><tr><th>PROPIEDAD</th><th>PROPIETARIO</th><th>MONTO</th></tr>`;
-                  const source =
-                    viewMode === "MONTH"
-                      ? (owners || []).flatMap((o) => {
-                          const ok = pickKeyCI(dataCurrent, o.name);
-                          const od = ok ? dataCurrent[ok] : {};
-                          return (o.properties || []).map((p) => {
-                            const pk = pickKeyCI(od, p);
-                            const val = pk ? Number(od[pk] || 0) : 0;
-                            return { prop: p, owner: o.name, val };
-                          });
-                        })
-                      : (owners || []).flatMap((o) =>
-                          (o.properties || []).map((p) => ({
-                            prop: p,
-                            owner: o.name,
-                            val: (dataAnnual[o.name] || {})[p]
-                              ? Number((dataAnnual[o.name] || {})[p])
-                              : 0,
-                          }))
-                        );
-                  source.forEach((r) => {
-                    html += `<tr><td>${r.prop}</td><td>${r.owner}</td><td class="num">${r.val}</td></tr>`;
-                  });
-                  html += `</table></body></html>`;
-                  const blob = new Blob([html], { type: "application/vnd.ms-excel" });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download =
-                    viewMode === "MONTH"
-                      ? `arriendos-${selectedMonthId}.xls`
-                      : `arriendos-${selectedYear}.xls`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                }}
-              >
-                EXPORTAR EXCEL
-              </button>
+                  <button
+                    className="hc-item"
+                    onClick={() => {
+                      handleExportExcel();
+                      setOptionsOpen(false);
+                    }}
+                  >
+                    EXPORTAR EXCEL
+                  </button>
 
-              <button className="btn" onClick={() => setShowTotalsModal(true)}>
-                TOTALES POR EMPRESA
-              </button>
-            </div>
+                  <button
+                    className="hc-item"
+                    onClick={() => {
+                      setShowTotalsModal(true);
+                      setOptionsOpen(false);
+                    }}
+                  >
+                    TOTALES POR EMPRESA
+                  </button>
 
-            <div className="actions-right">
-              <button className={messagesUnread ? "btn with-dot" : "btn"} onClick={() => setMessagesOpen(true)}>
-                MENSAJES
-              </button>
+                  <button
+                    className="hc-item"
+                    onClick={() => {
+                      setShowMissingModal(true);
+                      setOptionsOpen(false);
+                    }}
+                  >
+                    CONTRATOS FALTANTES
+                  </button>
 
-              <button className="btn" onClick={() => setShowMissingModal(true)}>
-                CONTRATOS FALTANTES
-              </button>
-
-              <button className="btn" onClick={() => setShowReajustesModal(true)}>
-                REAJUSTES DEL MES
-              </button>
-
-              <button
-                className="btn"
-                onClick={() => {
-                  if (role === "viewer") {
-                    setToast("SOLO LECTURA", "error");
-                    return;
-                  }
-                  setEditing((e) => !e);
-                }}
-              >
-                {editing ? "SALIR EDICION" : "ENTRAR EDICION"}
-              </button>
-
-              {role === "admin" && editing && (
-                <button
-                  className="btn strong"
-                  disabled={saving}
-                  onClick={async () => {
-                    setSaving(true);
-                    try {
-                      await setDoc(doc(db, "rents", selectedMonthId), dataCurrent || {}, { merge: true });
-                      await setDoc(doc(db, "structure", "owners"), { owners: owners || [] }, { merge: true });
-                      await setDoc(doc(db, "meta", "app"), { appTitle: appTitle || "INFORME MENSUAL DE ARRIENDOS" }, { merge: true });
-                      setToast("CAMBIOS GUARDADOS", "success");
-                      setEditing(false);
-                    } catch (e) {
-                      setToast(`NO SE PUDO GUARDAR: ${e?.message || ""}`, "error");
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
-                >
-                  {saving ? "GUARDANDO…" : "GUARDAR CAMBIOS"}
-                </button>
+                  <button
+                    className="hc-item"
+                    onClick={() => {
+                      setShowReajustesModal(true);
+                      setOptionsOpen(false);
+                    }}
+                  >
+                    REAJUSTES POR MES
+                  </button>
+                </div>
               )}
-
-              <button className="btn" onClick={() => { setRole(null); setEditing(false); }}>
-                SALIR
-              </button>
             </div>
+
+            {/* Resto de acciones visibles */}
+            <button className={messagesUnread ? "btn with-dot" : "btn"} onClick={() => setMessagesOpen(true)}>
+              MENSAJES
+            </button>
+
+            <button
+              className="btn"
+              onClick={() => {
+                if (role === "viewer") {
+                  setToast("SOLO LECTURA", "error");
+                  return;
+                }
+                setEditing((e) => !e);
+              }}
+            >
+              {editing ? "SALIR EDICION" : "ENTRAR EDICION"}
+            </button>
+
+            {role === "admin" && editing && (
+              <button
+                className="btn strong"
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    await setDoc(doc(db, "rents", selectedMonthId), dataCurrent || {}, { merge: true });
+                    await setDoc(doc(db, "structure", "owners"), { owners: owners || [] }, { merge: true });
+                    await setDoc(
+                      doc(db, "meta", "app"),
+                      { appTitle: appTitle || "INFORME MENSUAL DE ARRIENDOS" },
+                      { merge: true }
+                    );
+                    setToast("CAMBIOS GUARDADOS", "success");
+                    setEditing(false);
+                  } catch (e) {
+                    setToast(`NO SE PUDO GUARDAR: ${e?.message || ""}`, "error");
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+              >
+                {saving ? "GUARDANDO…" : "GUARDAR CAMBIOS"}
+              </button>
+            )}
+
+            <button className="btn" onClick={() => { setRole(null); setEditing(false); }}>
+              SALIR
+            </button>
           </div>
         </header>
 
         {/* CUERPO */}
         <div className={(loading || saving) ? "app-body blurred" : "app-body"}>
-          {/* Filtros */}
+          {/* Filtros (sin buscador) */}
           <div className="filters-bar">
             <div>
               <label className="filter-label">PROPIETARIO</label>
@@ -720,15 +675,6 @@ function AppCore() {
                 ))}
               </select>
             </div>
-            <div className="filter-search">
-              <label className="filter-label">BUSCAR</label>
-              <input
-                className="filter-input"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="PROPIEDAD O EMPRESA..."
-              />
-            </div>
 
             <div className="filter-summary">
               <button className="btn btn-secondary">
@@ -737,16 +683,10 @@ function AppCore() {
             </div>
           </div>
 
-          {/* Grilla mensual / anual */}
+          {/* Grilla mensual */}
           {viewMode === "MONTH" ? (
             (owners || [])
               .filter((o) => ownerFilter === "ALL" || o.name === ownerFilter)
-              .filter((o) => {
-                const t = norm(searchTerm);
-                if (!t) return true;
-                if (norm(o.name).includes(t)) return true;
-                return (o.properties || []).some((p) => norm(p).includes(t));
-              })
               .map((owner) => {
                 const okC = pickKeyCI(dataCurrent, owner.name);
                 const okP = pickKeyCI(dataPrev, owner.name);
@@ -886,9 +826,7 @@ function AppCore() {
                 <div className="owner-title"><span>RESUMEN ANUAL</span></div>
                 <div className="owner-total">TOTAL: {moneyCLP0(totalGeneralYear)}</div>
               </div>
-              <div className="annual-note">
-                CAMBIA EL AÑO EN EL HEADER PARA VER OTRO RESUMEN
-              </div>
+              <div className="annual-note">SELECCIONA AÑO EN EL HEADER</div>
             </div>
           )}
         </div>
@@ -955,9 +893,8 @@ function AppCore() {
                   onChange={async (e) => {
                     const iso = e.target.value;
                     setUfCalcDate(iso);
-                    const { rate, effectiveDate } = await pickUfWithFallback(iso);
+                    const rate = await getUfForDate(iso);
                     setUfCalcRate(rate);
-                    setUfCalcEffectiveDate(effectiveDate);
                   }}
                 />
 
@@ -999,11 +936,14 @@ function AppCore() {
                 </div>
 
                 <div className="uf-rate-note">
-                  {ufCalcRate ? (() => {
-                    const eff = ufCalcEffectiveDate || ufCalcDate;
-                    const diff = ufCalcEffectiveDate && ufCalcEffectiveDate !== ufCalcDate;
-                    return `UF DEL ${fmtDDMMYYYY(eff)}: ${moneyCLP2(ufCalcRate)}${diff ? " (ÚLTIMO DISP.)" : ""}`;
-                  })() : "SELECCIONE UNA FECHA"}
+                  {ufCalcRate ? `UF DEL ${(() => {
+                    const d = new Date(ufCalcDate);
+                    if (isNaN(d)) return ufCalcDate;
+                    const dd = String(d.getDate()).padStart(2, "0");
+                    const mm = String(d.getMonth() + 1).padStart(2, "0");
+                    const yyyy = d.getFullYear();
+                    return `${dd}-${mm}-${yyyy}`;
+                  })()}: ${moneyCLP2(ufCalcRate)}` : "SELECCIONE UNA FECHA"}
                 </div>
               </div>
             </div>
@@ -1113,10 +1053,13 @@ function AppCore() {
           onClose={() => setMessagesOpen(false)}
           onMarkedSeen={async () => {
             try {
-              await setDoc(doc(db, "meta", "messages"),
-                role === "admin" ? { unreadForAdmin: false, lastSeenAdmin: serverTimestamp() } :
-                                   { unreadForViewer: false, lastSeenViewer: serverTimestamp() },
-               { merge: true });
+              await setDoc(
+                doc(db, "meta", "messages"),
+                role === "admin"
+                  ? { unreadForAdmin: false, lastSeenAdmin: serverTimestamp() }
+                  : { unreadForViewer: false, lastSeenViewer: serverTimestamp() },
+                { merge: true }
+              );
               setMessagesUnread(false);
             } catch {}
           }}

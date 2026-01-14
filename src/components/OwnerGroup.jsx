@@ -1,14 +1,6 @@
 import React, { useMemo, useState } from "react";
 
-/** Utiles locales */
-const moneyCLP0 = (n) =>
-  Number(n || 0).toLocaleString("es-CL", {
-    style: "currency",
-    currency: "CLP",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  });
-
+/* Helpers locales */
 const norm = (str) =>
   String(str || "")
     .toLowerCase()
@@ -25,154 +17,265 @@ const pickKeyCI = (obj, targetName) => {
   return null;
 };
 
+const moneyCLP0 = (n) =>
+  Number(n || 0).toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
+
 export default function OwnerGroup({
   ownerName,
-  properties = [],
+  properties,
   dataByOwner = {},
   prevDataByOwner = {},
   editing = false,
-  onChangeProperty,        // (owner, property, newValue)
-  onChangePropertyObs,     // (owner, property, newObs)
-  onChangeOwnerName,       // (oldName, newName)
-  onChangePropertyName,    // (owner, oldProp, newProp)
-  onAddProperty,           // (owner)
-  onDeleteProperty,        // (owner, prop)
-  onClickProperty,         // (owner, prop)
+  onChangeProperty,          // (owner, prop, newValue)
+  onChangePropertyObs,       // (owner, prop, newObs)
+  onChangePropertyOnTime,    // (owner, prop, status|null)
+  onChangeOwnerName,         // (oldName, newName)
+  onChangePropertyName,      // (owner, oldProp, newProp)
+  onAddProperty,             // (owner)
+  onDeleteProperty,          // (owner, prop)
+  onClickProperty,           // (owner, prop)
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [ownerDraft, setOwnerDraft] = useState(ownerName);
+  const [ownerEdit, setOwnerEdit] = useState(ownerName);
 
-  const totalOwner = useMemo(() => {
-    return (properties || []).reduce((acc, p) => {
-      const pk = pickKeyCI(dataByOwner, p);
-      return acc + (pk ? Number(dataByOwner[pk] || 0) : 0);
-    }, 0);
-  }, [properties, dataByOwner]);
+  const header = (
+    <div className="owner-header">
+      <div className="owner-title">
+        {editing ? (
+          <input
+            className="inline-input owner-name-input"
+            value={ownerEdit}
+            onChange={(e) => setOwnerEdit(e.target.value.toUpperCase())}
+            onBlur={() => {
+              if (ownerEdit && ownerEdit !== ownerName) {
+                onChangeOwnerName(ownerName, ownerEdit);
+              } else {
+                setOwnerEdit(ownerName);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+          />
+        ) : (
+          <span>{ownerName}</span>
+        )}
+      </div>
+
+      <div className="owner-actions">
+        {editing && (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => onAddProperty(ownerName)}
+            title="AGREGAR PROPIEDAD"
+          >
+            +
+          </button>
+        )}
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={() => setCollapsed((c) => !c)}
+          title={collapsed ? "MOSTRAR" : "OCULTAR"}
+        >
+          {collapsed ? "+" : "−"}
+        </button>
+      </div>
+    </div>
+  );
+
+  const rows = useMemo(() => (properties || []).map((p) => {
+    const pk = pickKeyCI(dataByOwner, p);
+    const val = pk ? Number(dataByOwner[pk] || 0) : 0;
+
+    const pkPrev = pickKeyCI(prevDataByOwner, p);
+    const prev = pkPrev ? Number(prevDataByOwner[pkPrev] || 0) : 0;
+
+    const obsKey = Object.keys(dataByOwner || {}).find(
+      (k) => k.endsWith("__obs") && norm(k.replace(/__obs$/, "")) === norm(p)
+    );
+    const obs = obsKey ? String(dataByOwner[obsKey] || "") : "";
+
+    const onKey = Object.keys(dataByOwner || {}).find(
+      (k) => k.endsWith("__ontime") && norm(k.replace(/__ontime$/, "")) === norm(p)
+    );
+    const onTime = onKey == null ? null : !!dataByOwner[onKey];
+
+    let varPct = 0;
+    if (prev === 0) {
+      varPct = val === 0 ? 0 : null; // null = indefinido
+    } else {
+      varPct = ((val - prev) / Math.abs(prev)) * 100;
+    }
+
+    return { name: p, amount: val, prev, varPct, obs, onTime };
+  }), [properties, dataByOwner, prevDataByOwner]);
 
   return (
     <div className="owner-card">
-      <div className="owner-header">
-        <div className="owner-title">
-          {!editing ? (
-            <span>{ownerName}</span>
-          ) : (
-            <input
-              className="filter-input"
-              style={{ maxWidth: 360 }}
-              value={ownerDraft}
-              onChange={(e) => setOwnerDraft(e.target.value)}
-              onBlur={() => {
-                if (ownerDraft && ownerDraft !== ownerName) onChangeOwnerName(ownerName, ownerDraft);
-              }}
-              placeholder="NOMBRE PROPIETARIO"
-            />
-          )}
-          <button
-            className="icon-btn"
-            title={collapsed ? "MOSTRAR" : "OCULTAR"}
-            onClick={() => setCollapsed((v) => !v)}
-          >
-            {collapsed ? "+" : "−"}
-          </button>
-        </div>
-
-        <div className="owner-total">TOTAL: {moneyCLP0(totalOwner)}</div>
-      </div>
-
+      {header}
       {!collapsed && (
-        <div className="owner-body">
-          {(properties || []).map((prop) => {
-            const keyNow = pickKeyCI(dataByOwner, prop);
-            const keyPrev = pickKeyCI(prevDataByOwner, prop);
-            const valNow = keyNow ? Number(dataByOwner[keyNow] || 0) : 0;
-            const valPrev = keyPrev ? Number(prevDataByOwner[keyPrev] || 0) : 0;
+        <div className="props-list">
+          {rows.map((r) => {
+            const handleRowClick = (e) => {
+              // Evita que inputs/buttons abran el modal
+              if (e.target.closest("input,button,select,textarea")) return;
+              onClickProperty(ownerName, r.name);
+            };
 
-            const obsKey =
-              Object.keys(dataByOwner || {}).find(
-                (k) => k.endsWith("__obs") && norm(k.replace(/__obs$/, "")) === norm(prop)
-              ) || `${keyNow || prop}__obs`;
-
-            const obsVal = (dataByOwner && dataByOwner[obsKey]) || "";
-
-            const pct =
-              valPrev === 0
-                ? (valNow === 0 ? 0 : 100)
-                : Math.round(((valNow - valPrev) / Math.abs(valPrev)) * 100);
-
-            const pctClass =
-              pct > 0 ? "property-variation positive" : pct < 0 ? "property-variation negative" : "property-variation";
+            const varColor =
+              r.varPct === null ? "#999" : r.varPct > 0 ? "#22c55e" : r.varPct < 0 ? "#ef4444" : "#999";
 
             return (
-              <div className="property-row" key={`${ownerName}__${prop}`}>
-                {/* Nombre de propiedad (click abre historial) */}
-                <div className="property-name" onClick={() => onClickProperty(ownerName, prop)} title="VER HISTORIAL">
-                  {!editing ? (
-                    <span className="clickable">{prop}</span>
-                  ) : (
+              <div key={r.name} className="prop-row" onClick={handleRowClick}>
+                {/* Nombre de propiedad */}
+                <div className="col-name">
+                  {editing ? (
                     <input
-                      className="filter-input"
-                      value={prop}
-                      onChange={(e) => onChangePropertyName(ownerName, prop, e.target.value)}
+                      className="inline-input prop-name-input"
+                      defaultValue={r.name}
+                      onBlur={(e) => {
+                        const nv = (e.target.value || "").toUpperCase();
+                        if (nv && nv !== r.name) onChangePropertyName(ownerName, r.name, nv);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
                     />
-                  )}
-                </div>
-
-                {/* Monto */}
-                <div className="property-amount">
-                  {!editing ? (
-                    <span>{moneyCLP0(valNow)}</span>
                   ) : (
-                    <input
-                      className="filter-input"
-                      inputMode="numeric"
-                      placeholder="$"
-                      value={valNow || valNow === 0 ? String(valNow) : ""}
-                      onChange={(e) => onChangeProperty(ownerName, prop, e.target.value)}
-                    />
+                    <span className="prop-name">{r.name}</span>
                   )}
-                </div>
-
-                {/* % variación */}
-                <div className={pctClass}>{pct > 0 ? `+${pct}%` : `${pct}%`}</div>
-
-                {/* Observación (a la izquierda del % en layout general; aquí columna dedicada) */}
-                <div className="property-obs">
-                  {!editing ? (
-                    obsVal ? <span className="obs-text">{obsVal}</span> : null
-                  ) : (
-                    <input
-                      className="filter-input"
-                      maxLength={40}
-                      placeholder="OBS…"
-                      value={obsVal}
-                      onChange={(e) => onChangePropertyObs(ownerName, prop, e.target.value)}
-                    />
-                  )}
-                </div>
-
-                {/* Eliminar */}
-                <div style={{ textAlign: "right" }}>
                   {editing && (
                     <button
-                      className="icon-btn"
+                      className="btn btn-danger btn-xs"
                       title="ELIMINAR PROPIEDAD"
-                      onClick={() => onDeleteProperty(ownerName, prop)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteProperty(ownerName, r.name);
+                      }}
                     >
                       ×
                     </button>
                   )}
                 </div>
+
+                {/* Observación (a la izquierda del % variación) */}
+                <div className="col-obs">
+                  {editing ? (
+                    <input
+                      className="inline-input obs-input"
+                      maxLength={40}
+                      placeholder="OBS..."
+                      defaultValue={r.obs}
+                      onClick={(e) => e.stopPropagation()}
+                      onBlur={(e) => onChangePropertyObs(ownerName, r.name, e.target.value.toUpperCase())}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                    />
+                  ) : r.obs ? (
+                    <span className="obs-text">{r.obs}</span>
+                  ) : (
+                    <span className="obs-text" />
+                  )}
+                </div>
+
+                {/* Variación % (a la izquierda del monto) */}
+                <div className="col-var">
+                  {r.varPct === null ? (
+                    <span className="var-text" style={{ color: "#999" }}>—</span>
+                  ) : (
+                    <span
+                      className="var-text"
+                      style={{ color: varColor }}
+                    >
+                      {r.varPct === 0 ? "0%" : `${r.varPct > 0 ? "+" : ""}${r.varPct.toFixed(1)}%`}
+                    </span>
+                  )}
+                </div>
+
+                {/* Monto + esfera on-time a la derecha */}
+                <div className="col-amount">
+                  {editing ? (
+                    <>
+                      <input
+                        className="inline-input amount-input"
+                        type="number"
+                        inputMode="numeric"
+                        step="1"
+                        min="0"
+                        defaultValue={r.amount || ""}
+                        placeholder="0"
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => {
+                          const v = e.target.value;
+                          onChangeProperty(ownerName, r.name, v === "" ? "" : Number(v));
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") e.currentTarget.blur();
+                        }}
+                      />
+                      <select
+                        className="inline-input ontime-select"
+                        defaultValue={
+                          r.onTime === null ? "" : r.onTime === true ? "1" : "0"
+                        }
+                        title="PAGO A TIEMPO"
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "") onChangePropertyOnTime(ownerName, r.name, null);
+                          else onChangePropertyOnTime(ownerName, r.name, v === "1");
+                        }}
+                      >
+                        <option value="">—</option>
+                        <option value="1">A TIEMPO</option>
+                        <option value="0">TARDE</option>
+                      </select>
+                    </>
+                  ) : (
+                    <>
+                      <span className="amount-text">{moneyCLP0(r.amount)}</span>
+                      {r.onTime === true && (
+                        <span
+                          aria-label="PAGO A TIEMPO"
+                          title="PAGO A TIEMPO"
+                          style={{
+                            display: "inline-block",
+                            width: 10,
+                            height: 10,
+                            borderRadius: "50%",
+                            background: "#22c55e",
+                            marginLeft: 8,
+                            verticalAlign: "middle",
+                          }}
+                        />
+                      )}
+                      {r.onTime === false && (
+                        <span
+                          aria-label="PAGO TARDE"
+                          title="PAGO TARDE"
+                          style={{
+                            display: "inline-block",
+                            width: 10,
+                            height: 10,
+                            borderRadius: "50%",
+                            background: "#ef4444",
+                            marginLeft: 8,
+                            verticalAlign: "middle",
+                          }}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             );
           })}
-
-          {editing && (
-            <div style={{ padding: "8px 8px 12px" }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => onAddProperty(ownerName)}>
-                + AGREGAR PROPIEDAD
-              </button>
-            </div>
-          )}
         </div>
       )}
     </div>

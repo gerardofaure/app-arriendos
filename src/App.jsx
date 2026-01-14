@@ -398,7 +398,6 @@ function AppCore() {
     return () => unsub();
   }, [role]);
 
-  const computedHeaderTitle = viewMode === "YEAR" ? "INFORME ANUAL DE ARRIENDOS" : appTitle;
   const modalResetKey = `${historyOwner}__${historyProperty}__${historyOpen ? 1 : 0}`;
 
   /* Login */
@@ -539,7 +538,7 @@ function AppCore() {
 
           {/* ACCIONES */}
           <div className="actions-bar">
-            {/* Menú OPCIONES con cierre al hacer click fuera */}
+            {/* Menú OPCIONES */}
             <div className="hc-group" ref={optionsRef}>
               <button
                 className="btn hc-trigger"
@@ -724,6 +723,26 @@ function AppCore() {
                         return { ...prev, [ownerKey]: { ...od, [obsKey]: newObs } };
                       });
                     }}
+                    onChangePropertyOnTime={(ownerName, propertyName, status) => {
+                      setDataCurrent((prev) => {
+                        const ownerKey = pickKeyCI(prev, ownerName) ?? ownerName;
+                        const od = prev?.[ownerKey] || {};
+                        const existingOnKey =
+                          Object.keys(od).find(
+                            (k) => k.endsWith("__ontime") && norm(k.replace(/__ontime$/, "")) === norm(propertyName)
+                          ) || null;
+                        const propKey =
+                          Object.keys(od).find((k) => norm(k) === norm(propertyName)) ?? propertyName;
+                        const onKey = existingOnKey || `${propKey}__ontime`;
+                        const nd = { ...od };
+                        if (status === null || status === undefined) {
+                          delete nd[onKey];
+                        } else {
+                          nd[onKey] = !!status;
+                        }
+                        return { ...prev, [ownerKey]: nd };
+                      });
+                    }}
                     onChangeOwnerName={(oldName, newName) => {
                       if (!newName.trim()) return;
                       const NN = newName;
@@ -759,6 +778,10 @@ function AppCore() {
                           Object.keys(od).find(
                             (k) => k.endsWith("__obs") && norm(k.replace(/__obs$/, "")) === norm(oldProp)
                           ) || null;
+                        const onKey =
+                          Object.keys(od).find(
+                            (k) => k.endsWith("__ontime") && norm(k.replace(/__ontime$/, "")) === norm(oldProp)
+                          ) || null;
                         const nd = { ...od };
                         if (propKey in nd) {
                           nd[NP] = nd[propKey];
@@ -767,6 +790,10 @@ function AppCore() {
                         if (obsKey) {
                           nd[`${NP}__obs`] = nd[obsKey];
                           delete nd[obsKey];
+                        }
+                        if (onKey) {
+                          nd[`${NP}__ontime`] = nd[onKey];
+                          delete nd[onKey];
                         }
                         return { ...prev, [ownerKey]: nd };
                       });
@@ -810,9 +837,14 @@ function AppCore() {
                           Object.keys(od).find(
                             (k) => k.endsWith("__obs") && norm(k.replace(/__obs$/, "")) === norm(propName)
                           ) || null;
+                        const onKey =
+                          Object.keys(od).find(
+                            (k) => k.endsWith("__ontime") && norm(k.replace(/__ontime$/, "")) === norm(propName)
+                          ) || null;
                         const nd = { ...od };
                         delete nd[propKey];
                         if (obsKey) delete nd[obsKey];
+                        if (onKey) delete nd[onKey];
                         return { ...prev, [ownerKey]: nd };
                       });
                     }}

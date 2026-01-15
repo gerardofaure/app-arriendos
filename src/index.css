@@ -117,12 +117,10 @@ body {
 .col-var{ text-align: right; font-variant-numeric: tabular-nums; min-width: 64px; }
 .var-text{ display:inline-block; min-width: 64px; }
 
-/* >>> MONTO + ESFERA ALINEADA <<< */
+/* MONTO + ESFERA ALINEADA */
 .col-amount{
-  /* Antes era flex. Ahora es una grilla de 2 columnas:
-     [monto (1fr, alineado a la derecha)] [esfera (14px fija)]  */
   display: grid;
-  grid-template-columns: 1fr 14px;
+  grid-template-columns: 1fr 14px; /* monto | esfera */
   align-items: center;
   column-gap: 8px;
   font-variant-numeric: tabular-nums;
@@ -149,7 +147,7 @@ body {
 .login-error{ margin-top:8px; color:#b91c1c; font-size:12px; }
 .login-hint{ margin-top:6px; color:#334155; font-size:11px; }
 
-/* MODALES */
+/* MODALES BASE */
 .modal-backdrop{
   position: fixed; inset:0; background: rgba(10, 30, 50, .35);
   display:flex; align-items:center; justify-content:center; padding: 18px; z-index: 50;
@@ -201,15 +199,89 @@ body {
   text-align:center; color:#4b5563; font-size:12px; padding: 14px 0 4px;
 }
 
+/* ---------- MENSAJES (CHAT) ---------- */
+.messages-modal{ width: min(760px, 96vw); }
+.messages-body{ padding: 0; }
+.chat-wrap{
+  display:flex; flex-direction:column; height: 70vh; max-height: 70vh;
+}
+.chat-scroller{
+  flex:1; overflow:auto; padding: 12px 14px;
+  background: #f7fbff;
+}
+.chat-sep{
+  text-align:center; font-size:11px; color:#4b5563; margin:10px 0 4px;
+}
+.chat-row{
+  display:flex; margin: 6px 0;
+}
+.chat-row.other{ justify-content: flex-start; }
+.chat-row.mine{ justify-content: flex-end; }
+
+.bubble{
+  max-width: 80%;
+  border-radius: 14px;
+  padding: 8px 10px;
+  position: relative;
+  border: 1px solid #d7e7f3;
+  box-shadow: 0 2px 8px rgba(16,42,67,.06);
+  background: #ffffff;
+}
+.bubble.admin{ background: #e6f3ff; border-color:#cfe1ef; }   /* ADMIN */
+.bubble.viewer{ background: #edf4f8; border-color:#d7e7f3; }  /* USER */
+
+.bubble-meta{
+  display:flex; align-items:center; gap:8px; font-size: 10px; color:#55657a; margin-bottom:4px;
+}
+.bubble-from{ font-weight:700; color:#0b2948; }
+.bubble-time{ opacity:.9; }
+.bubble-del{
+  margin-left:auto;
+  background:transparent; border:1px solid #cfe1ef; width: 20px; height: 20px; border-radius: 6px; cursor:pointer;
+}
+.bubble-text{
+  font-size: 13px; color:#102a43; white-space: pre-wrap; word-break: break-word;
+}
+
+.chat-input-bar{
+  display:grid; grid-template-columns: 1fr auto; gap: 8px;
+  padding: 10px; border-top:1px solid #dbe8f2; background:#fff;
+}
+.chat-input{
+  height: 36px; border:1px solid #cfe1ef; border-radius: 10px; padding: 0 10px; outline:none; background:#fff;
+}
+
+/* ---------- MODAL ADM PASS ---------- */
+.adminpass-modal{ width: min(900px, 96vw); }
+.adminpass-add{ background:#f8fbff; border:1px solid #dfeaf5; border-radius:12px; padding:10px; }
+.adminpass-grid{
+  display:grid; grid-template-columns: 1fr 1fr 140px auto; gap: 8px; align-items:center;
+}
+.ap-input{
+  height: 36px; border:1px solid #cfe1ef; border-radius: 8px; padding: 0 10px; outline:none; background:#fff;
+}
+.ap-hint{ font-size:11px; color:#334155; margin-top:6px; }
+
+.adminpass-table{ margin-top:10px; border:1px solid #e5eef8; border-radius:12px; overflow:hidden; }
+.ap-head, .ap-row{
+  display:grid; grid-template-columns: 1fr 140px 1fr 150px; gap: 8px; align-items:center;
+}
+.ap-head{ background:#eef7ff; padding:8px 10px; font-weight:700; color:#123b64; }
+.ap-body{ background:#fff; }
+.ap-row{ padding:8px 10px; border-top:1px dashed #e5eef8; }
+.ap-username{ font-weight:600; color:#0f172a; }
+.ap-empty{ padding:12px; text-align:center; color:#6b7280; }
+
 /* RESPONSIVE */
 @media (max-width: 860px){
   .prop-row{
     grid-template-columns: minmax(180px,1fr) minmax(120px,.9fr) 70px 1fr;
   }
   .owner-header{ grid-template-columns: 1fr auto; }
+  .adminpass-grid{ grid-template-columns: 1fr 1fr; }
+  .ap-head, .ap-row{ grid-template-columns: 1fr 100px 1fr 120px; }
 }
 @media (max-width: 680px){
-  /* En móviles: NOMBRE | % | MONTO quedan arriba y OBS ocupa la fila completa debajo */
   .prop-row{
     grid-template-columns: 1fr 60px 1fr;
     grid-template-areas:

@@ -1,19 +1,23 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import OwnerGroup from "./components/OwnerGroup.jsx";
 import PropertyHistoryModal from "./components/PropertyHistoryModal.jsx";
 import MessagesModal from "./components/MessagesModal.jsx";
 import ReajustesModal from "./components/ReajustesModal.jsx";
+import AdminPassModal from "./components/AdminPassModal.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { OWNERS as FALLBACK_OWNERS } from "./data/properties.js";
 import { generateMonthRange, monthIdToParts, getPrevMonthId } from "./utils/months.js";
 import { db } from "./firebase.js";
 import {
+  collection,
   doc,
   getDoc,
-  setDoc,
-  collection,
+  getDocs,
   onSnapshot,
   serverTimestamp,
+  setDoc,
+  query,
+  where,
 } from "firebase/firestore";
 
 /* ===== Helpers ===== */
@@ -57,10 +61,19 @@ const pickKeyCI = (obj, targetName) => {
   return null;
 };
 
+async function sha256(text) {
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 /* ===== App ===== */
 function AppCore() {
-  /* Login */
-  const [role, setRole] = useState(null); // "viewer" | "admin" | null
+  /* Login / Usuario actual */
+  const [role, setRole] = useState(null);        // "viewer" | "admin" | null
+  const [username, setUsername] = useState(null); // ej: "admin" | "maria"
   const [loginUser, setLoginUser] = useState("");
   const [loginPass, setLoginPass] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -95,7 +108,7 @@ function AppCore() {
   /* Filtros/UI */
   const [ownerFilter, setOwnerFilter] = useState("ALL");
 
-  /* Dropdowns: refs + estado */
+  /* Dropdowns */
   const [headerMonthOpen, setHeaderMonthOpen] = useState(false);
   const monthRef = useRef(null);
 
@@ -124,19 +137,20 @@ function AppCore() {
   const [ufCalcUF, setUfCalcUF] = useState("");
   const [ufCalcCLP, setUfCalcCLP] = useState("");
 
-  /* Totales / Faltantes / Mensajes / Reajustes */
+  /* Totales / Faltantes / Mensajes / Reajustes / AdminPass */
   const [showTotalsModal, setShowTotalsModal] = useState(false);
   const [showMissingModal, setShowMissingModal] = useState(false);
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [messagesUnread, setMessagesUnread] = useState(false);
   const [showReajustesModal, setShowReajustesModal] = useState(false);
+  const [showAdminPass, setShowAdminPass] = useState(false);
 
   const showToast = (m, t = "info") => {
     setToast({ show: true, message: m, type: t });
     setTimeout(() => setToast((s) => ({ ...s, show: false })), 3200);
   };
 
-  /* Cierre automático de dropdowns: click fuera + ESC */
+  /* Cierre dropdowns */
   useEffect(() => {
     const onDown = (e) => {
       const target = e.target;
@@ -354,7 +368,6 @@ function AppCore() {
       setHistoryOpen(true);
       setHistoryLoading(true);
 
-      // últimos 6 desde el seleccionado
       const ids = [];
       let id = selectedMonthId;
       for (let i = 0; i < 6; i++) {
@@ -376,7 +389,6 @@ function AppCore() {
       }
       setHistoryData(rows);
 
-      // contrato
       setContractData(resolveContract(ownerName, propertyName));
     } catch {
       setHistoryData([]);
@@ -387,7 +399,7 @@ function AppCore() {
     }
   };
 
-  /* Mensajes: unread flag */
+  /* Mensajes: unread flag por rol (simple) */
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "meta", "messages"), (snap) => {
       const d = snap.data();
@@ -400,65 +412,50 @@ function AppCore() {
 
   const modalResetKey = `${historyOwner}__${historyProperty}__${historyOpen ? 1 : 0}`;
 
-  /* Login */
-  const handleLogin = (e) => {
-    e.preventDefault();
-    const u = (loginUser || "").toLowerCase().trim();
-    const p = (loginPass || "").trim();
-    if (u === "user" && p === "123") {
-      setRole("viewer"); setLoginError("");
-    } else if (u === "admin" && p === "123") {
-      setRole("admin"); setLoginError("");
-    } else {
-      setLoginError("USUARIO O CONTRASEÑA INCORRECTOS");
+  /* ======= LOGIN ======= */
+  // Auto-bootstrap: si intenta "admin/123" y no existe, se crea.
+  const bootstrapAdminIfNeeded = async () => {
+    const ref = doc(db, "users", "admin");
+    const s = await getDoc(ref);
+    if (!s.exists()) {
+      await setDoc(ref, {
+        username: "admin",
+        role: "admin",
+        passHash: await sha256("123"),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
     }
   };
 
-  /* Exportar Excel (para el menú) */
-  const handleExportExcel = () => {
-    const title =
-      viewMode === "MONTH"
-        ? `ARRIENDOS ${activeMonthLabel}`
-        : `ARRIENDOS AÑO ${selectedYear}`;
-    let html = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head><meta charset="UTF-8" /><title>${title}</title>
-      <style>table{border-collapse:collapse}th,td{border:1px solid #777;padding:4px 6px}th{background:#0f172a;color:#fff}.num{mso-number-format:"\\$ #,##0";text-align:right}</style>
-      </head><body><h2>${title}</h2><table><tr><th>PROPIEDAD</th><th>PROPIETARIO</th><th>MONTO</th></tr>`;
-    const source =
-      viewMode === "MONTH"
-        ? (owners || []).flatMap((o) => {
-            const ok = pickKeyCI(dataCurrent, o.name);
-            const od = ok ? dataCurrent[ok] : {};
-            return (o.properties || []).map((p) => {
-              const pk = pickKeyCI(od, p);
-              const val = pk ? Number(od[pk] || 0) : 0;
-              return { prop: p, owner: o.name, val };
-            });
-          })
-        : (owners || []).flatMap((o) =>
-            (o.properties || []).map((p) => ({
-              prop: p,
-              owner: o.name,
-              val: (dataAnnual[o.name] || {})[p]
-                ? Number((dataAnnual[o.name] || {})[p])
-                : 0,
-            }))
-          );
-    source.forEach((r) => {
-      html += `<tr><td>${r.prop}</td><td>${r.owner}</td><td class="num">${r.val}</td></tr>`;
-    });
-    html += `</table></body></html>`;
-    const blob = new Blob([html], { type: "application/vnd.ms-excel" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download =
-      viewMode === "MONTH"
-        ? `arriendos-${selectedMonthId}.xls`
-        : `arriendos-${selectedYear}.xls`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    const u = (loginUser || "").trim().toLowerCase();
+    const p = (loginPass || "").trim();
+    if (!u || !p) {
+      setLoginError("INGRESE USUARIO Y CONTRASEÑA");
+      return;
+    }
+    try {
+      await bootstrapAdminIfNeeded();
+      const ref = doc(db, "users", u);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        setLoginError("USUARIO NO EXISTE");
+        return;
+      }
+      const data = snap.data();
+      const hash = await sha256(p);
+      if (hash !== data.passHash) {
+        setLoginError("CONTRASEÑA INCORRECTA");
+        return;
+      }
+      setRole(data.role === "admin" ? "admin" : "viewer");
+      setUsername(u);
+      setLoginError("");
+    } catch (err) {
+      setLoginError("NO SE PUDO VALIDAR");
+    }
   };
 
   if (!role) {
@@ -475,7 +472,7 @@ function AppCore() {
             </label>
             <button type="submit" className="btn btn-primary login-btn">ENTRAR</button>
             {loginError && <div className="login-error">{loginError}</div>}
-            <div className="login-hint">USER / 123 = SOLO LECTURA · ADMIN / 123 = PUEDE EDITAR</div>
+            <div className="login-hint">APPCHILE --- 2026 --- PRUEBA V 0.04</div>
           </form>
         </div>
       </div>
@@ -566,7 +563,50 @@ function AppCore() {
                   <button
                     className="hc-item"
                     onClick={() => {
-                      handleExportExcel();
+                      // export simple desde estado
+                      const title =
+                        viewMode === "MONTH"
+                          ? `ARRIENDOS ${activeMonthLabel}`
+                          : `ARRIENDOS AÑO ${selectedYear}`;
+                      let html = `
+                        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+                        <head><meta charset="UTF-8" /><title>${title}</title>
+                        <style>table{border-collapse:collapse}th,td{border:1px solid #777;padding:4px 6px}th{background:#0f172a;color:#fff}.num{mso-number-format:"\\$ #,##0";text-align:right}</style>
+                        </head><body><h2>${title}</h2><table><tr><th>PROPIEDAD</th><th>PROPIETARIO</th><th>MONTO</th></tr>`;
+                      const source =
+                        viewMode === "MONTH"
+                          ? (owners || []).flatMap((o) => {
+                              const ok = pickKeyCI(dataCurrent, o.name);
+                              const od = ok ? dataCurrent[ok] : {};
+                              return (o.properties || []).map((p) => {
+                                const pk = pickKeyCI(od, p);
+                                const val = pk ? Number(od[pk] || 0) : 0;
+                                return { prop: p, owner: o.name, val };
+                              });
+                            })
+                          : (owners || []).flatMap((o) =>
+                              (o.properties || []).map((p) => ({
+                                prop: p,
+                                owner: o.name,
+                                val: (dataAnnual[o.name] || {})[p]
+                                  ? Number((dataAnnual[o.name] || {})[p])
+                                  : 0,
+                              }))
+                            );
+                      source.forEach((r) => {
+                        html += `<tr><td>${r.prop}</td><td>${r.owner}</td><td class="num">${r.val}</td></tr>`;
+                      });
+                      html += `</table></body></html>`;
+                      const blob = new Blob([html], { type: "application/vnd.ms-excel" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download =
+                        viewMode === "MONTH"
+                          ? `arriendos-${selectedMonthId}.xls`
+                          : `arriendos-${selectedYear}.xls`;
+                      a.click();
+                      URL.revokeObjectURL(url);
                       setOptionsOpen(false);
                     }}
                   >
@@ -602,11 +642,23 @@ function AppCore() {
                   >
                     REAJUSTES POR MES
                   </button>
+
+                  {role === "admin" && (
+                    <button
+                      className="hc-item"
+                      onClick={() => {
+                        setShowAdminPass(true);
+                        setOptionsOpen(false);
+                      }}
+                    >
+                      ADM PASS
+                    </button>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* Resto de acciones visibles */}
+            {/* Resto */}
             <button className={messagesUnread ? "btn with-dot" : "btn"} onClick={() => setMessagesOpen(true)}>
               MENSAJES
             </button>
@@ -614,7 +666,7 @@ function AppCore() {
             <button
               className="btn"
               onClick={() => {
-                if (role === "viewer") {
+                if (role !== "admin") {
                   setToast("SOLO LECTURA", "error");
                   return;
                 }
@@ -651,7 +703,7 @@ function AppCore() {
               </button>
             )}
 
-            <button className="btn" onClick={() => { setRole(null); setEditing(false); }}>
+            <button className="btn" onClick={() => { setRole(null); setEditing(false); setUsername(null); }}>
               SALIR
             </button>
           </div>
@@ -659,7 +711,6 @@ function AppCore() {
 
         {/* CUERPO */}
         <div className={(loading || saving) ? "app-body blurred" : "app-body"}>
-          {/* Filtros (sin buscador) */}
           <div className="filters-bar">
             <div>
               <label className="filter-label">PROPIETARIO</label>
@@ -682,7 +733,6 @@ function AppCore() {
             </div>
           </div>
 
-          {/* Grilla mensual */}
           {viewMode === "MONTH" ? (
             (owners || [])
               .filter((o) => ownerFilter === "ALL" || o.name === ownerFilter)
@@ -819,8 +869,7 @@ function AppCore() {
                       );
                     }}
                     onDeleteProperty={(ownerName, propName) => {
-                      const ok = window.confirm(`¿ELIMINAR "${propName}" DE "${ownerName}"?`);
-                      if (!ok) return;
+                      // eliminación directa; tu app ya evita alerts nativos
                       setOwners((prev) =>
                         (prev || []).map((o) =>
                           o.name !== ownerName
@@ -1082,6 +1131,7 @@ function AppCore() {
         <MessagesModal
           open={messagesOpen}
           role={role}
+          username={username || ""}
           onClose={() => setMessagesOpen(false)}
           onMarkedSeen={async () => {
             try {
@@ -1095,6 +1145,14 @@ function AppCore() {
               setMessagesUnread(false);
             } catch {}
           }}
+        />
+      )}
+
+      {/* MODAL: ADM PASS (SOLO ADMIN) */}
+      {role === "admin" && showAdminPass && (
+        <AdminPassModal
+          open={showAdminPass}
+          onClose={() => setShowAdminPass(false)}
         />
       )}
 

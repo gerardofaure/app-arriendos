@@ -1,55 +1,109 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { db } from "../firebase.js";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
-/* ===== Utils ===== */
-const moneyCLP0 = (n) =>
-  Number(n || 0).toLocaleString("es-CL", {
-    style: "currency",
-    currency: "CLP",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+/* ===== Helpers ===== */
+const norm = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+
+const pick = (obj, keys) => {
+  if (!obj) return undefined;
+  const ks = Object.keys(obj);
+  for (const want of keys) {
+    const k = ks.find((x) => norm(x) === norm(want));
+    if (k) return obj[k];
+  }
+  return undefined;
+};
+
+const MESES_ABR = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+
+const normId = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+
+const canonicalDocId = (owner, property) => `${normId(owner)}__${normId(property)}`;
+
+const isDateDDMMYYYY = (v) => /^\d{2}-\d{2}-\d{4}$/.test(String(v || ""));
+
+function stripToEditableNumber(raw) {
+  // Para editar: deja números, coma, punto y signo (sin $ ni UF ni letras)
+  return String(raw || "").replace(/[^\d,.\-]/g, "");
+}
+
+function parseNumberLoose(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  // Miles con punto -> los removemos, decimales con coma -> punto
+  const normalized = s.replace(/\./g, "").replace(",", ".");
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatCLP(rawNumeric) {
+  const n = typeof rawNumeric === "number" ? rawNumeric : parseNumberLoose(rawNumeric);
+  if (n === null) return "";
+  const intVal = Math.round(Math.abs(n)) * (n < 0 ? -1 : 1);
+  return `$${Math.abs(intVal).toLocaleString("es-CL")}${intVal < 0 ? "-" : ""}`.replace("0-", "-0"); // edge
+}
+
+function formatUF(rawNumeric) {
+  const n = typeof rawNumeric === "number" ? rawNumeric : parseNumberLoose(rawNumeric);
+  if (n === null) return "";
+  const isInt = Math.abs(n - Math.round(n)) < 1e-9;
+  const nf = new Intl.NumberFormat("es-CL", {
+    minimumFractionDigits: isInt ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+  return `${nf.format(n)} U.F.`;
+}
+
+function formatByUnit(amountNum, unit) {
+  if (amountNum === null || amountNum === undefined || amountNum === "") return "---";
+  const n = typeof amountNum === "number" ? amountNum : parseNumberLoose(amountNum);
+  if (n === null) return "---";
+  return unit === "UF" ? formatUF(n) : formatCLP(n);
+}
+
+/* ===== Mini gráfico simple (SVG) ===== */
+function MiniLineChart({ data = [], width = 360, height = 120, strokeWidth = 2 }) {
+  const pad = 10;
+  const W = width,
+    H = height;
+  const innerW = W - pad * 2,
+    innerH = H - pad * 2;
+
+  const vals = data.map((v) => Number(v || 0));
+  const max = Math.max(...vals, 1);
+  const min = Math.min(...vals, 0);
+  const span = max - min || 1;
+  const stepX = vals.length > 1 ? innerW / (vals.length - 1) : innerW;
+
+  const points = vals.map((v, i) => {
+    const x = pad + i * stepX;
+    const y = pad + innerH - ((v - min) / span) * innerH;
+    return `${x},${y}`;
   });
 
-const labelOrDash = (val, asMoney = false) => {
-  if (val === null || val === undefined || val === "") return "—";
-  if (asMoney) return moneyCLP0(Number(val) || val);
-  return String(val);
-};
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" className="sparkline">
+      <polyline fill="none" stroke="#0d6efd" strokeWidth={strokeWidth} points={points.join(" ")} />
+      {vals.map((v, i) => {
+        const x = pad + i * stepX;
+        const y = pad + innerH - ((v - min) / span) * innerH;
+        return <circle key={i} cx={x} cy={y} r="3" fill="#0d6efd" />;
+      })}
+    </svg>
+  );
+}
 
-const firstHit = (obj, keys) => {
-  if (!obj) return "";
-  for (const k of keys) {
-    if (obj[k] !== undefined && obj[k] !== null && obj[k] !== "") return obj[k];
-  }
-  return "";
-};
-
-const FIELDS = {
-  direccion: ["direccionPropiedad", "direccion", "dir", "DIRECCION"],
-  inicio: ["fechaInicio", "inicio", "fecha_inicio"],
-  vence: ["fechaTermino", "vencimiento", "fecha_vencimiento"],
-  aviso: ["fechaAvisoRenovacion", "fechaAviso", "aviso"],
-  valorArriendo: ["valorArriendo", "arriendo", "monto", "valor"],
-  garantia: ["garantia", "montoGarantia", "garantiaMonto", "monto_garantia", "GARANTIA"],
-  arrendatario: ["arrendatario", "nombreArrendatario"],
-  correo: ["correo", "email"],
-  telefono: ["telefono", "fono"],
-  aval: ["aval", "nombreAval"],
-  correoAval: ["avalCorreo", "correoAval", "emailAval"],
-  telefonoAval: ["avalTelefono", "telefonoAval", "fonoAval"],
-  contratoUrl: ["contratoUrl", "urlContrato", "contrato", "linkContrato", "pdf", "pdfUrl", "archivoContrato"],
-  reajusteMeses: ["reajusteMeses"], // array de números 1..12
-};
-
-const MESES = [
-  { n: 1, abbr: "ENE" }, { n: 2, abbr: "FEB" }, { n: 3, abbr: "MAR" },
-  { n: 4, abbr: "ABR" }, { n: 5, abbr: "MAY" }, { n: 6, abbr: "JUN" },
-  { n: 7, abbr: "JUL" }, { n: 8, abbr: "AGO" }, { n: 9, abbr: "SEP" },
-  { n: 10, abbr: "OCT" }, { n: 11, abbr: "NOV" }, { n: 12, abbr: "DIC" },
-];
-
-/* ===== Componente ===== */
 export default function PropertyHistoryModal({
   open,
   onClose,
@@ -58,577 +112,446 @@ export default function PropertyHistoryModal({
   history = [],
   loading = false,
   contract = null,
-  role = "viewer",
+  role, // "admin" | "viewer"
 }) {
-  const [isEditing, setIsEditing] = useState(false);
+  const [editing, setEditing] = useState(false);
 
-  // Drafts del contrato para edición
-  const [form, setForm] = useState({
-    direccion: "",
-    inicio: "",
-    vence: "",
-    aviso: "",
-    valorArriendo: "",
-    garantia: "",
-    arrendatario: "",
-    correo: "",
-    telefono: "",
-    aval: "",
-    correoAval: "",
-    telefonoAval: "",
-    contratoUrl: "",
-    reajusteMeses: [], // array de números
-  });
+  /* EDITABLES (BASE) */
+  const [direccion, setDireccion] = useState("");
+  const [inicio, setInicio] = useState("");
+  const [vence, setVence] = useState("");
+  const [arrendatario, setArrendatario] = useState("");
+  const [correo, setCorreo] = useState("");
+  const [telefono, setTelefono] = useState("");
+  const [aval, setAval] = useState("");
+  const [correoAval, setCorreoAval] = useState("");
+  const [telefonoAval, setTelefonoAval] = useState("");
+  const [contratoUrl, setContratoUrl] = useState("");
+  const [reajuste, setReajuste] = useState([]); // [1..12]
 
-  // Stats para el gráfico
-  const { maxValue, minValue } = useMemo(() => {
-    if (!Array.isArray(history) || !history.length) {
-      return { maxValue: 1, minValue: 0 };
-    }
-    const vals = history.map((h) => Number(h.value || 0));
-    const max = Math.max(...vals);
-    const min = Math.min(...vals);
-    return { maxValue: max || 1, minValue: min || 0 };
-  }, [history]);
+  /* MONTO + UNIDAD (SIN CONVERTIR) */
+  const [valorStr, setValorStr] = useState("");
+  const [valorUnit, setValorUnit] = useState("CLP"); // "CLP" | "UF"
+  const [multaStr, setMultaStr] = useState("");
+  const [multaUnit, setMultaUnit] = useState("CLP");
+  const [garStr, setGarStr] = useState("");
+  const [garUnit, setGarUnit] = useState("CLP");
 
-  // Puntos pre-calculados del gráfico de líneas
-  const chartPoints = useMemo(() => {
-    const src =
-      history && history.length
-        ? history
-        : [{ monthId: "0", monthLabel: "—", value: 0 }];
-
-    const H = 110;  // altura sutil
-    const W = 260;  // ancho de viewBox (se escala al 100%)
-    const paddingX = 8;
-    const paddingY = 8;
-    const span = maxValue - minValue || 1;
-
-    const points = [];
-    const meta = [];
-
-    src.forEach((r, idx) => {
-      const t = src.length > 1 ? idx / (src.length - 1) : 0.5; // 0..1
-      const vRaw = Number(r.value || 0);
-      const rel = (vRaw - minValue) / span;
-      const vClamped = Number.isFinite(rel)
-        ? Math.min(1, Math.max(0, rel))
-        : 0.5;
-      const y = H - paddingY - vClamped * (H - 2 * paddingY);
-      const x = paddingX + t * (W - 2 * paddingX);
-
-      points.push(`${x},${y}`);
-      meta.push({
-        x,
-        y,
-        label: r.monthLabel || "—",
-        value: vRaw,
-        id: r.monthId ?? idx,
-      });
-    });
-
-    return {
-      H,
-      W,
-      pointsStr: points.join(" "),
-      meta,
-    };
-  }, [history, maxValue, minValue]);
-
-  // Inicializa formularios cuando cambie el contrato o al abrir
+  // cargar contract al abrir/cambiar
   useEffect(() => {
-    const f = (k) => firstHit(contract, FIELDS[k]);
-    const rj = f("reajusteMeses");
-    setForm({
-      direccion: f("direccion") || "",
-      inicio: f("inicio") || "",
-      vence: f("vence") || "",
-      aviso: f("aviso") || "",
-      valorArriendo: f("valorArriendo") || "",
-      garantia: f("garantia") || "",
-      arrendatario: f("arrendatario") || "",
-      correo: f("correo") || "",
-      telefono: f("telefono") || "",
-      aval: f("aval") || "",
-      correoAval: f("correoAval") || "",
-      telefonoAval: f("telefonoAval") || "",
-      contratoUrl: f("contratoUrl") || "",
-      reajusteMeses: Array.isArray(rj)
-        ? rj.filter((x) => Number(x) >= 1 && Number(x) <= 12).map((x) => Number(x))
-        : [],
-    });
-    setIsEditing(false);
-  }, [contract, open]);
+    if (!open) return;
 
-  const toggleReajusteMes = (n) => {
-    setForm((f) => {
-      const has = (f.reajusteMeses || []).includes(n);
-      return {
-        ...f,
-        reajusteMeses: has
-          ? (f.reajusteMeses || []).filter((x) => x !== n)
-          : [...(f.reajusteMeses || []), n].sort((a, b) => a - b),
-      };
-    });
+    setEditing(false);
+
+    setDireccion(pick(contract, ["direccionPropiedad", "direccion", "direccionInmueble"]) || "");
+    setInicio(pick(contract, ["inicio", "inicioContrato", "fechaInicio"]) || "");
+    setVence(pick(contract, ["vence", "vencimiento", "terminoContrato", "fechaTermino"]) || "");
+    setArrendatario(pick(contract, ["arrendatario", "cliente", "tenant"]) || "");
+    setCorreo(pick(contract, ["correo", "email", "mail"]) || "");
+    setTelefono(pick(contract, ["telefono", "telefonoArrendatario", "phone"]) || "");
+    setAval(pick(contract, ["aval", "fiador"]) || "");
+    setCorreoAval(pick(contract, ["correoAval", "emailAval"]) || "");
+    setTelefonoAval(pick(contract, ["telefonoAval", "phoneAval"]) || "");
+    setContratoUrl(pick(contract, ["contratoPdfUrl", "pdfUrl", "contratoUrl", "contrato"]) || "");
+
+    // NUEVOS CAMPOS (AMOUNT + UNIT) - fallback a lo viejo
+    const vU = pick(contract, ["valorArriendoUnit"]) || (pick(contract, ["valorArriendoUF"]) ? "UF" : "CLP");
+    const vA =
+      pick(contract, ["valorArriendoAmount"]) ??
+      (vU === "UF" ? pick(contract, ["valorArriendoUF"]) : pick(contract, ["valorArriendoCLP", "valorArriendo"])) ??
+      "";
+    setValorUnit(vU === "UF" ? "UF" : "CLP");
+    setValorStr(vA !== "" && vA !== null && vA !== undefined ? String(vA) : "");
+
+    const mU = pick(contract, ["multaUnit"]) || (pick(contract, ["multaUF"]) ? "UF" : "CLP");
+    const mA =
+      pick(contract, ["multaAmount"]) ??
+      (mU === "UF" ? pick(contract, ["multaUF"]) : pick(contract, ["multaCLP", "multa"])) ??
+      "";
+    setMultaUnit(mU === "UF" ? "UF" : "CLP");
+    setMultaStr(mA !== "" && mA !== null && mA !== undefined ? String(mA) : "");
+
+    const gU = pick(contract, ["garantiaUnit"]) || (pick(contract, ["garantiaUF"]) ? "UF" : "CLP");
+    const gA =
+      pick(contract, ["garantiaAmount"]) ??
+      (gU === "UF" ? pick(contract, ["garantiaUF"]) : pick(contract, ["garantiaCLP", "garantia"])) ??
+      "";
+    setGarUnit(gU === "UF" ? "UF" : "CLP");
+    setGarStr(gA !== "" && gA !== null && gA !== undefined ? String(gA) : "");
+
+    const raw = pick(contract, ["reajuste", "mesesReajuste", "reajustes"]);
+    if (Array.isArray(raw)) {
+      const clean = raw
+        .map((m) => Number(String(m).replace(/\D/g, "")))
+        .filter((x) => x >= 1 && x <= 12);
+      setReajuste(clean);
+    } else {
+      setReajuste([]);
+    }
+  }, [contract, ownerName, propertyName, open]);
+
+  const series = useMemo(() => history.map((h) => Number(h?.value || 0)), [history]);
+  const bubbles = useMemo(
+    () =>
+      history
+        .slice()
+        .reverse()
+        .map((h, i) => ({
+          key: `${h.monthId}_${i}`,
+          label: h.monthLabel || h.monthId || "",
+          value: Number(h.value || 0),
+        })),
+    [history]
+  );
+
+  if (!open) return null;
+
+  const monthChipActive = (m) => reajuste.includes(m);
+  const toggleMonth = (m) => {
+    setReajuste((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m].sort((a, b) => a - b)));
   };
 
-  const saveContract = async () => {
-    // guardamos bajo ID canónico owner__property
-    const id = `${ownerName
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]+/g, "-")}__${propertyName
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]+/g, "-")}`;
+  const invalidInicio = editing && inicio && !isDateDDMMYYYY(inicio);
+  const invalidVence = editing && vence && !isDateDDMMYYYY(vence);
 
-    const toNumber = (x) => {
-      if (x === null || x === undefined || x === "") return "";
-      const n = Number(String(x).replace(/\./g, "").replace(",", "."));
-      return isNaN(n) ? x : n;
-    };
+  const canSave = role === "admin" && !invalidInicio && !invalidVence;
+
+  const onMoneyFocus = (val, setVal) => {
+    setVal(stripToEditableNumber(val));
+  };
+
+  const onMoneyBlur = (val, unit, setVal) => {
+    const n = parseNumberLoose(val);
+    if (n === null) {
+      setVal("");
+      return;
+    }
+    setVal(unit === "UF" ? formatUF(n) : formatCLP(n));
+  };
+
+  const amountNumberFromFormatted = (val, unit) => {
+    const n = parseNumberLoose(val);
+    if (n === null) return 0;
+    if (unit === "CLP") return Math.round(n);
+    return Math.round(n * 100) / 100; // UF con 2 decimales máx
+  };
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    const id = canonicalDocId(ownerName, propertyName);
+
+    const vNum = amountNumberFromFormatted(valorStr, valorUnit);
+    const mNum = amountNumberFromFormatted(multaStr, multaUnit);
+    const gNum = amountNumberFromFormatted(garStr, garUnit);
 
     const payload = {
       owner: ownerName,
       property: propertyName,
-      direccionPropiedad: form.direccion,
-      fechaInicio: form.inicio,
-      fechaTermino: form.vence,
-      fechaAvisoRenovacion: form.aviso,
-      valorArriendo: toNumber(form.valorArriendo),
-      garantia: toNumber(form.garantia),
-      arrendatario: form.arrendatario,
-      correo: form.correo,
-      telefono: form.telefono,
-      aval: form.aval,
-      correoAval: form.correoAval,
-      telefonoAval: form.telefonoAval,
-      contratoUrl: form.contratoUrl,
-      reajusteMeses: Array.isArray(form.reajusteMeses) ? form.reajusteMeses : [],
-      updatedAt: new Date().toISOString(),
+      direccionPropiedad: direccion || "",
+      inicio: inicio || "",
+      vence: vence || "",
+
+      // NUEVO MODELO: MONTO + UNIDAD (SIN CONVERSIÓN)
+      valorArriendoAmount: vNum,
+      valorArriendoUnit: valorUnit, // "CLP" | "UF"
+      multaAmount: mNum,
+      multaUnit: multaUnit,
+      garantiaAmount: gNum,
+      garantiaUnit: garUnit,
+
+      // Compatibilidad con lo antiguo (NO CONVIERTE; SI ES UF, SE DEJA EN 0)
+      valorArriendo: valorUnit === "CLP" ? vNum : 0,
+      multa: multaUnit === "CLP" ? mNum : 0,
+      garantia: garUnit === "CLP" ? gNum : 0,
+
+      // También dejamos los campos separados por unidad por si ya los usabas
+      valorArriendoCLP: valorUnit === "CLP" ? vNum : 0,
+      valorArriendoUF: valorUnit === "UF" ? vNum : 0,
+      multaCLP: multaUnit === "CLP" ? mNum : 0,
+      multaUF: multaUnit === "UF" ? mNum : 0,
+      garantiaCLP: garUnit === "CLP" ? gNum : 0,
+      garantiaUF: garUnit === "UF" ? gNum : 0,
+
+      arrendatario: arrendatario || "",
+      correo: correo || "",
+      telefono: telefono || "",
+      aval: aval || "",
+      correoAval: correoAval || "",
+      telefonoAval: telefonoAval || "",
+      contratoPdfUrl: contratoUrl || "",
+      reajuste: Array.isArray(reajuste) ? reajuste : [],
+      updatedAt: serverTimestamp(),
     };
 
-    await setDoc(doc(db, "contracts", id), payload, { merge: true });
-    setIsEditing(false);
+    try {
+      await setDoc(doc(db, "contracts", id), payload, { merge: true });
+      setEditing(false);
+    } catch (e) {
+      console.error("NO SE PUDO GUARDAR CONTRATO:", e);
+    }
   };
 
-  if (!open) return null;
-
-  const contratoUrlView = firstHit(contract, FIELDS.contratoUrl);
+  const vDisplay = formatByUnit(parseNumberLoose(valorStr), valorUnit);
+  const mDisplay = formatByUnit(parseNumberLoose(multaStr), multaUnit);
+  const gDisplay = formatByUnit(parseNumberLoose(garStr), garUnit);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card history-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">DETALLE DE {propertyName}</div>
-          <button className="modal-close" onClick={onClose}>
-            ×
-          </button>
+          <div className="modal-title">
+            {ownerName} / {propertyName}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {role !== "admin" ? (
+              <span className="btn btn-secondary btn-xs" title="SOLO LECTURA">
+                SOLO LECTURA
+              </span>
+            ) : !editing ? (
+              <button className="btn btn-secondary" onClick={() => setEditing(true)}>
+                ENTRAR EDITAR
+              </button>
+            ) : (
+              <>
+                <button className="btn" onClick={() => setEditing(false)}>
+                  CANCELAR
+                </button>
+                <button className="btn btn-primary" onClick={handleSave} disabled={!canSave}>
+                  GUARDAR
+                </button>
+              </>
+            )}
+
+            <button className="modal-close" onClick={onClose}>
+              ×
+            </button>
+          </div>
         </div>
 
         <div className="modal-body history-body">
-          {loading ? (
-            <div className="modal-loading">
-              <div className="loader-hourglass">⌛</div>
-              <div className="loader-text">CARGANDO HISTORIAL...</div>
+          {/* TOP: burbujas + gráfico */}
+          <div className="history-top">
+            <div className="history-left">
+              {bubbles.map((b) => (
+                <div key={b.key} className="bubble viewer history-bubble">
+                  <div className="bubble-meta">
+                    <span className="bubble-from">{b.label}</span>
+                  </div>
+                  <div className="bubble-text" style={{ fontWeight: 700 }}>
+                    {`$${Number(b.value || 0).toLocaleString("es-CL")}`}
+                  </div>
+                </div>
+              ))}
             </div>
-          ) : (
-            <>
-              {/* HISTORIAL 6 MESES */}
-              <section className="history-block">
-                <div className="section-title">ÚLTIMOS 6 MESES</div>
+            <div className="history-right">
+              <MiniLineChart data={series} />
+            </div>
+          </div>
 
-                {/* Tabla simple */}
-                <div className="minitable">
-                  <div className="minitable-head">
-                    <div>MES</div>
-                    <div>MONTO</div>
-                  </div>
-                  <div className="minitable-body">
-                    {history.length === 0 ? (
-                      <div className="minitable-row">
-                        <div>SIN DATOS</div>
-                        <div style={{ textAlign: "right" }}>—</div>
-                      </div>
-                    ) : (
-                      history.map((r) => (
-                        <div key={r.monthId} className="minitable-row">
-                          <div>{r.monthLabel}</div>
-                          <div style={{ textAlign: "right" }}>
-                            {moneyCLP0(r.value)}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
+          {/* CONTRATO */}
+          <div className="contract-card">
+            <div className="section-title">DETALLE DE CONTRATO</div>
+
+            {!editing ? (
+              <div className="contract-grid">
+                <div className="c-label">DIRECCIÓN</div>
+                <div className="c-val">{direccion || "---"}</div>
+
+                <div className="c-label">INICIO</div>
+                <div className="c-val">{inicio || "---"}</div>
+
+                <div className="c-label">VENCE</div>
+                <div className="c-val">{vence || "---"}</div>
+
+                <div className="c-label">VALOR ARRIENDO</div>
+                <div className="c-val">{vDisplay}</div>
+
+                <div className="c-label">MULTA</div>
+                <div className="c-val">{mDisplay}</div>
+
+                <div className="c-label">GARANTÍA</div>
+                <div className="c-val">{gDisplay}</div>
+
+                <div className="c-label">ARRENDATARIO</div>
+                <div className="c-val">{arrendatario || "---"}</div>
+
+                <div className="c-label">CORREO</div>
+                <div className="c-val">{correo || "---"}</div>
+
+                <div className="c-label">TELÉFONO</div>
+                <div className="c-val">{telefono || "---"}</div>
+
+                <div className="c-label">AVAL</div>
+                <div className="c-val">{aval || "---"}</div>
+
+                <div className="c-label">CORREO AVAL</div>
+                <div className="c-val">{correoAval || "---"}</div>
+
+                <div className="c-label">TELÉFONO AVAL</div>
+                <div className="c-val">{telefonoAval || "---"}</div>
+
+                <div className="c-label">CONTRATO</div>
+                <div className="c-val">
+                  {contratoUrl ? (
+                    <a href={contratoUrl} target="_blank" rel="noreferrer" className="c-link">
+                      CONTRATO PDF {propertyName}
+                    </a>
+                  ) : (
+                    "NO DISPONIBLE"
+                  )}
                 </div>
 
-                {/* Gráfico de líneas sutil */}
-                <div className="history-chart">
-                  <svg
-                    viewBox={`0 0 ${chartPoints.W} ${chartPoints.H}`}
-                    preserveAspectRatio="none"
-                  >
-                    {chartPoints.meta.length > 1 && (
-                      <polyline
-                        points={chartPoints.pointsStr}
-                        fill="none"
-                        stroke="#bb86fc"
-                        strokeWidth="1.2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    )}
-
-                    {chartPoints.meta.map((pt) => (
-                      <circle
-                        key={pt.id}
-                        cx={pt.x}
-                        cy={pt.y}
-                        r={2.2}
-                        fill="#bb86fc"
-                      >
-                        <title>
-                          {pt.label}: {moneyCLP0(pt.value)}
-                        </title>
-                      </circle>
-                    ))}
-                  </svg>
-
-                  <div className="history-chart-labels">
-                    {chartPoints.meta.map((pt) => (
-                      <span key={`lbl-${pt.id}`}>
-                        {(pt.label || "—").split(" ")[0]}
-                      </span>
-                    ))}
-                  </div>
+                <div className="c-label">REAJUSTE</div>
+                <div className="c-val">{reajuste.length ? reajuste.map((m) => MESES_ABR[m - 1]).join("-") : "---"}</div>
+              </div>
+            ) : (
+              <div className="contract-grid">
+                <div className="c-label">DIRECCIÓN</div>
+                <div>
+                  <input className="inline-input" value={direccion} onChange={(e) => setDireccion(e.target.value)} />
                 </div>
-              </section>
 
-              {/* INFORMACIÓN DE CONTRATO + REAJUSTE */}
-              <section className="contract-info">
-                <div className="section-title">INFORMACIÓN DE CONTRATO</div>
+                <div className="c-label">INICIO</div>
+                <div>
+                  <input
+                    className="inline-input"
+                    placeholder="DD-MM-AAAA"
+                    value={inicio}
+                    onChange={(e) => setInicio(e.target.value)}
+                    style={invalidInicio ? { borderColor: "#b91c1c" } : undefined}
+                  />
+                </div>
 
-                {!isEditing ? (
-                  <>
-                    <div className="kv-grid">
-                      <div className="k">DIRECCIÓN</div>
-                      <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.direccion))}
-                      </div>
-                      <div className="k">INICIO</div>
-                      <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.inicio))}
-                      </div>
-                      <div className="k">VENCE</div>
-                      <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.vence))}
-                      </div>
-                      <div className="k">AVISO</div>
-                      <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.aviso))}
-                      </div>
-                      <div className="k">VALOR ARRIENDO</div>
-                      <div className="v">
-                        {labelOrDash(
-                          firstHit(contract, FIELDS.valorArriendo),
-                          true
-                        )}
-                      </div>
-                      <div className="k">GARANTÍA</div>
-                      <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.garantia), true)}
-                      </div>
-                      <div className="k">ARRENDATARIO</div>
-                      <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.arrendatario))}
-                      </div>
-                      <div className="k">CORREO</div>
-                      <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.correo))}
-                      </div>
-                      <div className="k">TELÉFONO</div>
-                      <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.telefono))}
-                      </div>
-                      <div className="k">AVAL</div>
-                      <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.aval))}
-                      </div>
-                      <div className="k">CORREO AVAL</div>
-                      <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.correoAval))}
-                      </div>
-                      <div className="k">TELÉFONO AVAL</div>
-                      <div className="v">
-                        {labelOrDash(firstHit(contract, FIELDS.telefonoAval))}
-                      </div>
-                      <div className="k">CONTRATO</div>
-                      <div className="v">
-                        {contratoUrlView ? (
-                          <a
-                            className="contract-link"
-                            href={contratoUrlView}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            CONTRATO PDF{" "}
-                            {propertyName ? propertyName.toUpperCase() : ""}
-                          </a>
-                        ) : (
-                          "NO DISPONIBLE"
-                        )}
-                      </div>
-                      <div className="k">REAJUSTE</div>
-                      <div className="v">
-                        {(() => {
-                          const rj = firstHit(contract, FIELDS.reajusteMeses);
-                          const arr = Array.isArray(rj) ? rj : [];
-                          const labels = MESES.filter((m) =>
-                            arr.includes(m.n)
-                          ).map((m) => m.abbr);
-                          return labels.length ? labels.join("-") : "—";
-                        })()}
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="kv-grid">
-                      <div className="k">DIRECCIÓN</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.direccion}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              direccion: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="k">INICIO</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.inicio}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              inicio: e.target.value,
-                            }))
-                          }
-                          placeholder="DD-MM-AAAA"
-                        />
-                      </div>
-                      <div className="k">VENCE</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.vence}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              vence: e.target.value,
-                            }))
-                          }
-                          placeholder="DD-MM-AAAA"
-                        />
-                      </div>
-                      <div className="k">AVISO</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.aviso}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              aviso: e.target.value,
-                            }))
-                          }
-                          placeholder="DD-MM-AAAA"
-                        />
-                      </div>
-                      <div className="k">VALOR ARRIENDO</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.valorArriendo}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              valorArriendo: e.target.value,
-                            }))
-                          }
-                          placeholder="$"
-                        />
-                      </div>
-                      <div className="k">GARANTÍA</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.garantia}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              garantia: e.target.value,
-                            }))
-                          }
-                          placeholder="$"
-                        />
-                      </div>
-                      <div className="k">ARRENDATARIO</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.arrendatario}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              arrendatario: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="k">CORREO</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.correo}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              correo: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="k">TELÉFONO</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.telefono}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              telefono: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="k">AVAL</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.aval}
-                          onChange={(e) =>
-                            setForm((f) => ({ ...f, aval: e.target.value }))
-                          }
-                        />
-                      </div>
-                      <div className="k">CORREO AVAL</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.correoAval}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              correoAval: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="k">TELÉFONO AVAL</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.telefonoAval}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              telefonoAval: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="k">CONTRATO URL</div>
-                      <div className="v">
-                        <input
-                          className="filter-input"
-                          value={form.contratoUrl}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              contratoUrl: e.target.value,
-                            }))
-                          }
-                          placeholder="https://..."
-                        />
-                      </div>
-                    </div>
+                <div className="c-label">VENCE</div>
+                <div>
+                  <input
+                    className="inline-input"
+                    placeholder="DD-MM-AAAA"
+                    value={vence}
+                    onChange={(e) => setVence(e.target.value)}
+                    style={invalidVence ? { borderColor: "#b91c1c" } : undefined}
+                  />
+                </div>
 
-                    <div
-                      className="section-title"
-                      style={{ marginTop: 12 }}
+                {/* VALOR ARRIENDO: INPUT + SELECTOR */}
+                <div className="c-label">VALOR ARRIENDO</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    className="inline-input"
+                    style={{ flex: 1 }}
+                    placeholder={valorUnit === "UF" ? "EJ: 2,5" : "EJ: 1000000"}
+                    value={valorStr}
+                    onChange={(e) => setValorStr(e.target.value)}
+                    onFocus={() => onMoneyFocus(valorStr, setValorStr)}
+                    onBlur={() => onMoneyBlur(valorStr, valorUnit, setValorStr)}
+                  />
+                  <select className="inline-input" value={valorUnit} onChange={(e) => setValorUnit(e.target.value)}>
+                    <option value="CLP">PESOS</option>
+                    <option value="UF">UF</option>
+                  </select>
+                </div>
+
+                {/* MULTA */}
+                <div className="c-label">MULTA</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    className="inline-input"
+                    style={{ flex: 1 }}
+                    placeholder={multaUnit === "UF" ? "EJ: 1" : "EJ: 50000"}
+                    value={multaStr}
+                    onChange={(e) => setMultaStr(e.target.value)}
+                    onFocus={() => onMoneyFocus(multaStr, setMultaStr)}
+                    onBlur={() => onMoneyBlur(multaStr, multaUnit, setMultaStr)}
+                  />
+                  <select className="inline-input" value={multaUnit} onChange={(e) => setMultaUnit(e.target.value)}>
+                    <option value="CLP">PESOS</option>
+                    <option value="UF">UF</option>
+                  </select>
+                </div>
+
+                {/* GARANTÍA */}
+                <div className="c-label">GARANTÍA</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    className="inline-input"
+                    style={{ flex: 1 }}
+                    placeholder={garUnit === "UF" ? "EJ: 2" : "EJ: 1000000"}
+                    value={garStr}
+                    onChange={(e) => setGarStr(e.target.value)}
+                    onFocus={() => onMoneyFocus(garStr, setGarStr)}
+                    onBlur={() => onMoneyBlur(garStr, garUnit, setGarStr)}
+                  />
+                  <select className="inline-input" value={garUnit} onChange={(e) => setGarUnit(e.target.value)}>
+                    <option value="CLP">PESOS</option>
+                    <option value="UF">UF</option>
+                  </select>
+                </div>
+
+                <div className="c-label">ARRENDATARIO</div>
+                <div>
+                  <input className="inline-input" value={arrendatario} onChange={(e) => setArrendatario(e.target.value)} />
+                </div>
+
+                <div className="c-label">CORREO</div>
+                <div>
+                  <input className="inline-input" value={correo} onChange={(e) => setCorreo(e.target.value)} />
+                </div>
+
+                <div className="c-label">TELÉFONO</div>
+                <div>
+                  <input className="inline-input" value={telefono} onChange={(e) => setTelefono(e.target.value)} />
+                </div>
+
+                <div className="c-label">AVAL</div>
+                <div>
+                  <input className="inline-input" value={aval} onChange={(e) => setAval(e.target.value)} />
+                </div>
+
+                <div className="c-label">CORREO AVAL</div>
+                <div>
+                  <input className="inline-input" value={correoAval} onChange={(e) => setCorreoAval(e.target.value)} />
+                </div>
+
+                <div className="c-label">TELÉFONO AVAL</div>
+                <div>
+                  <input className="inline-input" value={telefonoAval} onChange={(e) => setTelefonoAval(e.target.value)} />
+                </div>
+
+                <div className="c-label">CONTRATO (URL)</div>
+                <div>
+                  <input
+                    className="inline-input"
+                    value={contratoUrl}
+                    onChange={(e) => setContratoUrl(e.target.value)}
+                    placeholder="https://..."
+                  />
+                </div>
+
+                <div className="c-label">REAJUSTE</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={"btn btn-xs " + (monthChipActive(m) ? "btn-primary" : "btn-secondary")}
+                      onClick={() => toggleMonth(m)}
                     >
-                      REAJUSTE (SELECCIONA MESES)
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: 8,
-                      }}
-                    >
-                      {MESES.map((m) => {
-                        const active = (form.reajusteMeses || []).includes(m.n);
-                        return (
-                          <button
-                            type="button"
-                            key={m.n}
-                            onClick={() => toggleReajusteMes(m.n)}
-                            className={
-                              active
-                                ? "btn btn-secondary btn-sm"
-                                : "btn btn-outline btn-sm"
-                            }
-                          >
-                            {m.abbr}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </section>
-            </>
-          )}
+                      {MESES_ABR[m - 1]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="modal-footer" style={{ gap: 8 }}>
-          {role === "admin" && !isEditing && (
-            <button className="btn" onClick={() => setIsEditing(true)}>
-              ENTRAR EDICIÓN
-            </button>
-          )}
-          {role === "admin" && isEditing && (
-            <>
-              <button className="btn strong" onClick={saveContract}>
-                GUARDAR
-              </button>
-              <button className="btn" onClick={() => setIsEditing(false)}>
-                CANCELAR
-              </button>
-            </>
-          )}
-          <button className="btn" onClick={onClose}>
-            CERRAR
-          </button>
-        </div>
+        {loading && (
+          <div className="loading-overlay">
+            <div className="loader-hourglass">⌛</div>
+            <div className="loader-text">CARGANDO…</div>
+          </div>
+        )}
       </div>
     </div>
   );

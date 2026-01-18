@@ -46,7 +46,7 @@ body {
   content:""; position:absolute; right:6px; top:6px; width:6px; height:6px; border-radius:50%; background:#ef4444;
 }
 
-/* DROPDOWNS (selector de mes + opciones) */
+/* DROPDOWNS */
 .hc-group{ position:relative; }
 .hc-trigger{ min-width: 180px; display:flex; align-items:center; justify-content:space-between; }
 .hc-dropdown{
@@ -72,7 +72,7 @@ body {
 }
 .filter-summary{ margin-left:auto; }
 
-/* OWNER CARD (grupo) */
+/* OWNER CARD */
 .owner-card{
   background: #f6fbff;
   border: 1px solid #d7e7f3;
@@ -88,16 +88,16 @@ body {
 .owner-title{ font-weight:700; color:#123b64; }
 .owner-actions{ display:flex; gap: 6px; }
 
-/* LISTA DE PROPIEDADES */
+/* LISTA PROPIEDADES */
 .props-list{
   display:flex; flex-direction:column; gap: 6px;
   padding: 10px 12px 14px;
 }
 
-/* FILA HORIZONTAL DE PROPIEDAD */
+/* FILA PROPIEDAD */
 .prop-row{
   display: grid;
-  grid-template-columns: minmax(220px,1.2fr) minmax(160px,.9fr) 80px 1fr; /* NOMBRE | OBS | % | MONTO+ESFERA */
+  grid-template-columns: minmax(220px,1.2fr) minmax(160px,.9fr) 80px 1fr;
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
@@ -105,7 +105,6 @@ body {
 }
 .prop-row:hover{ background:#f0f7fd; }
 
-/* COLUMNAS */
 .col-name{ display:flex; align-items:center; gap:6px; min-width: 0; }
 .prop-name{ font-weight:600; color:#0f172a; }
 .owner-name-input, .prop-name-input{ width: 100%; max-width: 420px; }
@@ -117,10 +116,9 @@ body {
 .col-var{ text-align: right; font-variant-numeric: tabular-nums; min-width: 64px; }
 .var-text{ display:inline-block; min-width: 64px; }
 
-/* MONTO + ESFERA ALINEADA */
 .col-amount{
   display: grid;
-  grid-template-columns: 1fr 14px; /* monto | esfera */
+  grid-template-columns: 1fr 14px;
   align-items: center;
   column-gap: 8px;
   font-variant-numeric: tabular-nums;
@@ -129,7 +127,7 @@ body {
 .amount-input{ width: 130px; text-align: right; }
 .ontime-select{ width: 120px; }
 
-/* INPUTS INLINE */
+/* INPUTS */
 .inline-input{
   background:#fff; border:1px solid #cfe1ef; border-radius:8px; padding:6px 8px; outline:none;
 }
@@ -164,27 +162,61 @@ body {
 .modal-close{ background:transparent; border:1px solid #cfe1ef; width:32px; height:32px; border-radius: 10px; cursor:pointer; }
 .modal-body{ padding: 12px 14px; }
 
-/* UF MODAL */
-.uf-modal-card{ width: min(980px, 96vw); }
-.uf-modal-body{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.uf-left{ background:#f8fbff; border:1px solid #dfeaf5; border-radius:12px; padding:10px; }
-.uf-right{ background:#f8fbff; border:1px solid #dfeaf5; border-radius:12px; padding:10px; }
-.uf-today-line{ font-weight:600; margin-bottom:6px; }
-.section-title{ font-weight:700; color:#0b2948; font-size:12px; margin: 8px 0; }
-.uf-list{ list-style:none; padding:0; margin:0; max-height: 360px; overflow:auto; }
-.uf-item{ display:flex; align-items:center; justify-content:space-between; padding:6px 4px; border-bottom:1px dashed #e5eef8; }
-.uf-label{ display:block; font-size:12px; color:#0b2948; margin-bottom:4px; }
-.uf-input{ width:100%; height:36px; border:1px solid #cfe1ef; border-radius:8px; padding:0 10px; outline:none; }
-.uf-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.uf-rate-note{ margin-top:8px; font-size:12px; color:#334155; }
-
-/* TOTALES / FALTANTES LISTAS */
-.totals-list, .missing-list{ list-style:none; padding:0; margin:0; }
-.totals-item, .missing-item{
-  display:grid; grid-template-columns: 1fr auto; align-items:center; gap:8px;
-  padding:8px 4px; border-bottom:1px dashed #e5eef8;
+/* MODAL HISTORIAL (90% ALTO) */
+.history-modal{
+  width: min(980px, 96vw);
+  height: 90vh;
+  display:flex; flex-direction:column;
 }
-.totals-footer{ padding-top:6px; font-weight:700; }
+.history-body{ flex:1; overflow:auto; }
+.history-top{
+  display:grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items:start;
+  margin-bottom: 12px;
+}
+.history-left{ display:flex; flex-direction:column; gap: 8px; }
+.history-right{ background:#f8fbff; border:1px solid #dfeaf5; border-radius:12px; padding:8px; min-height: 140px; }
+.sparkline{ display:block; width:100%; height:140px; }
+
+/* BURBUJAS (BASE) */
+.bubble{
+  border-radius: 14px;
+  padding: 8px 10px;
+  position: relative;
+}
+.bubble-meta{ display:flex; align-items:center; gap:8px; font-size: 10px; margin-bottom:4px; }
+.bubble-from{ font-weight:700; }
+.bubble-text{ font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+
+/* BURBUJAS HISTORIAL */
+.history-modal .bubble{
+  border: 1px solid #d7e7f3;
+  box-shadow: 0 2px 8px rgba(16,42,67,.06);
+  background: #edf4f8;
+}
+.history-modal .bubble-from{ color:#0b2948; }
+.history-modal .bubble-meta{ color:#55657a; }
+.history-bubble .bubble-text{ font-size: 14px; color:#102a43; }
+
+/* CONTRATO */
+.contract-card{
+  background:#f8fbff; border:1px solid #dfeaf5; border-radius:12px; padding:10px;
+}
+.section-title{ font-weight:700; color:#0b2948; font-size:12px; margin: 8px 0; }
+.contract-grid{
+  display:grid; grid-template-columns: 160px 1fr; gap: 8px 12px; align-items:center;
+}
+.c-label{ font-size:12px; color:#0b2948; font-weight:700; }
+.c-val{ font-size:13px; color:#102a43; }
+.c-link{ color:#0d6efd; text-decoration:none; border-bottom:1px dashed #0d6efd; padding-bottom:1px; }
+.c-link:hover{ opacity:.9; }
+
+/* DUAL INPUT CLP/UF */
+.c-dual{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.c-dual .inline-input{ width: 100%; }
 
 /* LOADING OVERLAY */
 .loading-overlay{
@@ -199,78 +231,71 @@ body {
   text-align:center; color:#4b5563; font-size:12px; padding: 14px 0 4px;
 }
 
-/* ---------- MENSAJES (CHAT) ---------- */
+/* ===== MENSAJES (WHATSAPP-LIKE) ===== */
 .messages-modal{ width: min(760px, 96vw); }
 .messages-body{ padding: 0; }
-.chat-wrap{
-  display:flex; flex-direction:column; height: 70vh; max-height: 70vh;
-}
+.chat-wrap{ display:flex; flex-direction:column; height: 70vh; max-height: 70vh; }
+
+/* fondo tipo WhatsApp */
 .chat-scroller{
-  flex:1; overflow:auto; padding: 12px 14px;
-  background: #f7fbff;
+  flex:1; overflow:auto;
+  padding: 12px 14px;
+  background: #e5ddd5;
+  background-image: radial-gradient(rgba(0,0,0,.05) 1px, transparent 1px);
+  background-size: 18px 18px;
 }
+
 .chat-sep{
-  text-align:center; font-size:11px; color:#4b5563; margin:10px 0 4px;
+  text-align:center; font-size:11px; color:#374151;
+  margin:10px 0 4px;
+  display:inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.65);
 }
-.chat-row{
-  display:flex; margin: 6px 0;
-}
+
+.chat-row{ display:flex; margin: 6px 0; }
 .chat-row.other{ justify-content: flex-start; }
 .chat-row.mine{ justify-content: flex-end; }
 
-.bubble{
-  max-width: 80%;
+/* burbujas en mensajes (override fuerte para no afectar historial) */
+.messages-modal .bubble{
+  max-width: 78%;
   border-radius: 14px;
   padding: 8px 10px;
-  position: relative;
-  border: 1px solid #d7e7f3;
-  box-shadow: 0 2px 8px rgba(16,42,67,.06);
+  border: none;
+  box-shadow: 0 2px 10px rgba(0,0,0,.10);
   background: #ffffff;
 }
-.bubble.admin{ background: #e6f3ff; border-color:#cfe1ef; }   /* ADMIN */
-.bubble.viewer{ background: #edf4f8; border-color:#d7e7f3; }  /* USER */
 
-.bubble-meta{
-  display:flex; align-items:center; gap:8px; font-size: 10px; color:#55657a; margin-bottom:4px;
+.messages-modal .chat-row.mine .bubble{
+  background: #dcf8c6; /* verde WhatsApp */
 }
-.bubble-from{ font-weight:700; color:#0b2948; }
-.bubble-time{ opacity:.9; }
-.bubble-del{
-  margin-left:auto;
-  background:transparent; border:1px solid #cfe1ef; width: 20px; height: 20px; border-radius: 6px; cursor:pointer;
+
+.messages-modal .bubble-meta{
+  display:flex; align-items:center; gap:8px;
+  font-size: 10px; color:#374151; margin-bottom:4px;
 }
-.bubble-text{
-  font-size: 13px; color:#102a43; white-space: pre-wrap; word-break: break-word;
+.messages-modal .bubble-from{ font-weight:700; color:#111827; }
+.messages-modal .bubble-time{ margin-left:auto; opacity:.85; }
+.messages-modal .bubble-text{ font-size: 13px; color:#111827; }
+
+.messages-modal .bubble-del{
+  margin-left:8px;
+  background: rgba(255,255,255,.6);
+  border: 1px solid rgba(0,0,0,.12);
+  width: 20px; height: 20px;
+  border-radius: 6px; cursor:pointer;
 }
 
 .chat-input-bar{
   display:grid; grid-template-columns: 1fr auto; gap: 8px;
-  padding: 10px; border-top:1px solid #dbe8f2; background:#fff;
+  padding: 10px; border-top:1px solid #d1d5db; background:#fff;
 }
 .chat-input{
   height: 36px; border:1px solid #cfe1ef; border-radius: 10px; padding: 0 10px; outline:none; background:#fff;
 }
-
-/* ---------- MODAL ADM PASS ---------- */
-.adminpass-modal{ width: min(900px, 96vw); }
-.adminpass-add{ background:#f8fbff; border:1px solid #dfeaf5; border-radius:12px; padding:10px; }
-.adminpass-grid{
-  display:grid; grid-template-columns: 1fr 1fr 140px auto; gap: 8px; align-items:center;
-}
-.ap-input{
-  height: 36px; border:1px solid #cfe1ef; border-radius: 8px; padding: 0 10px; outline:none; background:#fff;
-}
-.ap-hint{ font-size:11px; color:#334155; margin-top:6px; }
-
-.adminpass-table{ margin-top:10px; border:1px solid #e5eef8; border-radius:12px; overflow:hidden; }
-.ap-head, .ap-row{
-  display:grid; grid-template-columns: 1fr 140px 1fr 150px; gap: 8px; align-items:center;
-}
-.ap-head{ background:#eef7ff; padding:8px 10px; font-weight:700; color:#123b64; }
-.ap-body{ background:#fff; }
-.ap-row{ padding:8px 10px; border-top:1px dashed #e5eef8; }
-.ap-username{ font-weight:600; color:#0f172a; }
-.ap-empty{ padding:12px; text-align:center; color:#6b7280; }
+.chat-send{ min-width: 96px; }
 
 /* RESPONSIVE */
 @media (max-width: 860px){
@@ -278,8 +303,8 @@ body {
     grid-template-columns: minmax(180px,1fr) minmax(120px,.9fr) 70px 1fr;
   }
   .owner-header{ grid-template-columns: 1fr auto; }
-  .adminpass-grid{ grid-template-columns: 1fr 1fr; }
-  .ap-head, .ap-row{ grid-template-columns: 1fr 100px 1fr 120px; }
+  .history-top{ grid-template-columns: 1fr; }
+  .c-dual{ grid-template-columns: 1fr; }
 }
 @media (max-width: 680px){
   .prop-row{
@@ -294,4 +319,58 @@ body {
   .col-amount{ grid-area: amount; grid-template-columns: 1fr 14px; }
   .col-obs{ grid-area: obs; }
   .obs-input, .obs-text{ max-width: 100%; }
+}
+/* ===== MENSAJES (WHATSAPP-LIKE) - RESTORE ===== */
+.messages-modal{ width: min(760px, 96vw); }
+.messages-body{ padding: 0; }
+.chat-wrap{ display:flex; flex-direction:column; height: 70vh; max-height: 70vh; }
+
+.chat-scroller{
+  flex:1; overflow:auto;
+  padding: 12px 14px;
+  background: #e5ddd5;
+  background-image: radial-gradient(rgba(0,0,0,.05) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+.chat-row{ display:flex; margin: 6px 0; }
+.chat-row.other{ justify-content: flex-start; }
+.chat-row.mine{ justify-content: flex-end; }
+
+.messages-modal .bubble{
+  max-width: 78%;
+  border-radius: 14px;
+  padding: 8px 10px;
+  border: none !important;
+  box-shadow: 0 2px 10px rgba(0,0,0,.10);
+  background: #ffffff;
+}
+
+.messages-modal .chat-row.mine .bubble{
+  background: #dcf8c6; /* verde WhatsApp */
+}
+
+.messages-modal .bubble-meta{
+  display:flex; align-items:center; gap:8px;
+  font-size: 10px; color:#374151; margin-bottom:4px;
+}
+.messages-modal .bubble-from{ font-weight:700; color:#111827; }
+.messages-modal .bubble-time{ margin-left:auto; opacity:.85; }
+.messages-modal .bubble-text{ font-size: 13px; color:#111827; }
+
+.messages-modal .bubble-del{
+  margin-left:8px;
+  background: rgba(255,255,255,.6);
+  border: 1px solid rgba(0,0,0,.12);
+  width: 20px; height: 20px;
+  border-radius: 6px; cursor:pointer;
+}
+
+.chat-input-bar{
+  display:grid; grid-template-columns: 1fr auto; gap: 8px;
+  padding: 10px; border-top:1px solid #d1d5db; background:#fff;
+}
+.chat-input{
+  height: 36px; border:1px solid #cfe1ef; border-radius: 10px;
+  padding: 0 10px; outline:none; background:#fff;
 }

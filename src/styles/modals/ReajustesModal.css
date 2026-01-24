@@ -1,0 +1,30 @@
+/* ============================================================
+   ReajustesModal
+   ============================================================ */
+
+.missing-list{
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.missing-item{
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  font-weight: 800;
+}
+
+.missing-item .btn{ flex: 0 0 auto; }
+
+@media (max-width: 520px){
+  .missing-item{ flex-direction: column; align-items: stretch; }
+  .missing-item .btn{ width: 100%; }
+}

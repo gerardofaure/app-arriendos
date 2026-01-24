@@ -1,0 +1,29 @@
+/* ============================================================
+   AdminPassModal (gestión de usuarios)
+   ============================================================ */
+
+.ap-shell{ display: grid; gap: 12px; }
+.ap-topbar{ display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.ap-select{ width: min(360px, 100%); }
+.ap-content{ display: grid; gap: 12px; }
+
+.ap-card{
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.ap-card-title{ font-weight: 900; margin-bottom: 6px; }
+.ap-hint2{ color: var(--muted); font-weight: 700; font-size: 13px; }
+
+.ap-grid{
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.ap-lab{ color: var(--muted); font-weight: 900; font-size: 12px; }
+.ap-in{ width: 100%; }
+.ap-actions{ display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; }

@@ -1,0 +1,124 @@
+/* ============================================================
+   Base / Tokens compartidos
+   (se importa UNA sola vez en src/main.jsx)
+   ============================================================ */
+
+:root{
+  --wa-green: #25D366;
+  --wa-green-hover: #1DA851;
+  --wa-green-pressed: #128C7E;
+
+  --bg: #F4F6F7;
+  --surface: #FFFFFF;
+  --surface-2: #FBFCFD;
+
+  --text: #111B21;
+  --muted: #667781;
+
+  --border: #E6E8EB;
+  --ring: rgba(37, 211, 102, .20);
+  --shadow: 0 10px 28px rgba(0,0,0,.10);
+
+  --r-xl: 20px;
+  --r-lg: 16px;
+  --r-md: 12px;
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+*{ box-sizing: border-box; }
+html, body{ height: 100%; }
+
+body{
+  margin: 0;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root{ min-height: 100vh; }
+
+/* ---------- Form controls (compartidos) ---------- */
+label{
+  display:block;
+  margin: 0 0 6px 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+input, select, textarea{
+  width: 100%;
+  padding: 12px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  outline: none;
+  transition: border .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+input:focus, select:focus, textarea:focus{
+  border-color: rgba(37,211,102,.55);
+  box-shadow: 0 0 0 4px var(--ring);
+}
+
+::placeholder{ color: rgba(102,119,129,.65); }
+
+/* ---------- Botones (compartidos) ---------- */
+.btn,
+a.btn,
+input[type="button"].btn,
+input[type="submit"].btn{
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  user-select: none;
+
+  background: var(--wa-green);
+  color: #fff;
+
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 800;
+  letter-spacing: .2px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+
+  transition: transform .05s ease, filter .15s ease, background .15s ease;
+}
+
+.btn:hover{ background: var(--wa-green-hover); }
+.btn:active{ background: var(--wa-green-pressed); transform: translateY(1px); }
+.btn:disabled{ opacity: .55; cursor: not-allowed; }
+
+/* alias para no romper clases existentes */
+.btn-primary{ }
+
+.btn-secondary{
+  background: rgba(37,211,102,.12);
+  color: var(--text);
+}
+.btn-secondary:hover{ background: rgba(37,211,102,.18); }
+.btn-secondary:active{ background: rgba(18,140,126,.22); }
+
+.btn-danger{ background: #ef4444; }
+.btn-danger:hover{ background: #dc2626; }
+
+.btn-sm{ padding: 8px 10px; border-radius: 999px; font-weight: 900; }
+.btn-xs{ padding: 6px 8px; border-radius: 999px; font-weight: 900; }
+
+/* Inputs inline (se usa en varias secciones) */
+.inline-input{
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-weight: 800;
+}

@@ -1,0 +1,226 @@
+/* ============================================================
+   App principal (layout + header + dropdowns + toast)
+   ============================================================ */
+
+.app-shell{
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 18px;
+}
+
+.app-card{
+  width: 66.666vw; /* 2/3 en desktop */
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.app-header{
+  background: linear-gradient(180deg, #FFFFFF 0%, var(--surface-2) 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 16px;
+}
+
+.header-grid{
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 18px;
+  align-items: start;
+}
+
+.header-left{ display: grid; gap: 10px; justify-items: start; }
+
+.header-top{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-title{ font-weight: 900; letter-spacing: .2px; font-size: 16px; }
+
+.btn-logout{ padding: 9px 14px; }
+
+.header-left-controls{ display: grid; gap: 10px; width: min(520px, 100%); }
+
+/* Selector de mes en cascada (Año + Mes) */
+.month-cascade{
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.month-cascade .header-select{ width: 100%; min-width: 0; }
+
+.header-select{ width: min(420px, 100%); }
+
+.header-right{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.header-action{ justify-self: end; }
+
+.app-body{ padding: 16px; }
+
+/* Indicador de no-leídos */
+.with-dot{ position: relative; }
+.with-dot::after{
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 3px #fff;
+}
+
+/* ---------- Dropdown genérico (Opciones / Mes) ---------- */
+.hc-block{ position: relative; display: inline-flex; }
+
+.hc-button{
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--wa-green);
+  color: #fff;
+  font-weight: 800;
+}
+
+.hc-button:hover{ background: var(--wa-green-hover); }
+.hc-button:active{ background: var(--wa-green-pressed); transform: translateY(1px); }
+
+.hc-caret{ opacity: .9; }
+
+.hc-menu{
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 50;
+  min-width: 240px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  padding: 8px;
+}
+
+.hc-label{
+  padding: 8px 10px 6px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .2px;
+}
+
+.hc-item{
+  width: 100%;
+  display: flex;
+  justify-content: flex-start;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-weight: 800;
+  border: 0;
+  cursor: pointer;
+}
+
+.hc-item:hover{ background: rgba(37,211,102,.10); }
+
+.hc-sep{ height: 1px; background: var(--border); margin: 8px 6px; }
+
+/* ---------- Loading + Toast ---------- */
+.loading{
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  color: var(--muted);
+  font-weight: 800;
+  background: rgba(102,119,129,.04);
+}
+
+.toast{
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  padding: 12px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-weight: 900;
+  z-index: 80;
+}
+
+.toast.success{ border-color: rgba(34,197,94,.35); }
+.toast.error{ border-color: rgba(220,38,38,.35); }
+.toast.info{ border-color: rgba(59,130,246,.35); }
+
+/* ---------- Annual ---------- */
+.annual-wrap{ display: grid; gap: 12px; }
+.annual-title{ font-weight: 900; }
+.annual-table{
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.annual-row{
+  display: grid;
+  grid-template-columns: 1.2fr 1.4fr 0.8fr;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(0,0,0,.06);
+  align-items: center;
+}
+.annual-row:first-child{ border-top: 0; }
+
+.annual-head{
+  background: var(--surface-2);
+  font-weight: 900;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: .2px;
+}
+
+/* ---------- Grid principal ---------- */
+.main-grid{ display: grid; gap: 14px; grid-template-columns: 1fr; }
+
+/* ---------- Responsive base ---------- */
+@media (max-width: 1024px){
+  .app-card{ width: 100%; }
+  .header-grid{ grid-template-columns: 1fr; }
+  .header-right{ align-items: stretch; }
+  .header-right .btn, .header-right .hc-button{ width: 100%; }
+}
+
+@media (max-width: 520px){
+  .app-shell{ padding: 12px; }
+  .app-header{ padding: 14px; }
+  .app-body{ padding: 14px; }
+  .header-top{ flex-direction: column; align-items: flex-start; }
+  .btn-logout{ width: 100%; }
+
+  .month-cascade{
+    grid-template-columns: 1fr;
+  }
+}

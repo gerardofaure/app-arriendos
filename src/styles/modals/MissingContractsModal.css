@@ -1,0 +1,71 @@
+/* Modal: Contratos faltantes */
+
+.mc-subtitle{
+  font-family: Helvetica, Arial, sans-serif;
+  font-weight: 900;
+  font-size: 13px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+.mc-empty{
+  font-family: Helvetica, Arial, sans-serif;
+  font-weight: 900;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  background: rgba(0,0,0,.02);
+  text-align: center;
+}
+
+.mc-group{
+  margin: 12px 0 18px;
+}
+
+.mc-owner{
+  font-family: Helvetica, Arial, sans-serif;
+  font-weight: 900;
+  letter-spacing: .5px;
+  margin-bottom: 8px;
+}
+
+.mc-table{
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.mc-row{
+  display: grid;
+  grid-template-columns: 1.2fr .7fr .6fr;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  align-items: center;
+}
+
+.mc-row:last-child{ border-bottom: 0; }
+
+.mc-head{
+  background: var(--surface-2);
+  font-weight: 900;
+}
+
+.mc-prop{
+  font-weight: 800;
+}
+
+.mc-status{
+  font-weight: 900;
+  color: var(--muted);
+}
+
+@media (max-width: 680px){
+  .mc-row{
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .mc-head{ display: none; }
+}

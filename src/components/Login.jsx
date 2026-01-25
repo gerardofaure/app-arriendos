@@ -1,17 +1,25 @@
-import React, { useMemo, useState } from "react";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import React, { useEffect, useMemo, useState } from "react";
+import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase.js";
+import mascotImg from "../assets/login-mascot.png";
 import "../styles/Login.css";
 
 /**
- * En tu proyecto original (AdminPassModal), los usuarios se guardan en:
- *  - users/{docId} donde docId = username en minúsculas (trim)
- *  - campo passHash (SHA-256 hex)
+ * LOGIN (centrado, fondo blanco perla)
+ * - Valida contra users/{docId} con passHash (SHA-256 hex)
+ * - Mantiene compatibilidad con campos antiguos: passhash / passwordHash
+ * - Lee 2 bloques informativos desde Firestore (live) para poder cambiarlos sin redeploy.
  *
- * Este login soporta también variantes antiguas:
- *  - docId exacto / minúsculas / normalizado con guiones
- *  - campo passHash / passhash / passwordHash
+ * Firestore sugerido:
+ *   Collection: ui
+ *   Doc: login
+ *   Fields:
+ *     cards: [
+ *       { icon: "🔒", title: "Título", body: "Texto..." },
+ *       { icon: "📣", title: "Título", body: "Texto..." }
+ *     ]
  */
+
 const normalizeUsername = (username) =>
   String(username || "")
     .trim()
@@ -35,25 +43,21 @@ async function fetchUserByUsername(usernameRaw) {
   const lower = raw.toLowerCase();
   const norm = normalizeUsername(raw);
 
-  // 1) docId exacto (por si acaso)
   if (raw) {
     const s = await getDoc(doc(db, "users", raw));
     if (s.exists()) return { id: s.id, ...s.data() };
   }
 
-  // 2) docId en minúsculas (el caso más común en tu app)
   if (lower && lower !== raw) {
     const s = await getDoc(doc(db, "users", lower));
     if (s.exists()) return { id: s.id, ...s.data() };
   }
 
-  // 3) docId normalizado con guiones (fallback)
   if (norm && norm !== lower) {
     const s = await getDoc(doc(db, "users", norm));
     if (s.exists()) return { id: s.id, ...s.data() };
   }
 
-  // 4) por campo username (fallback)
   if (raw) {
     const q1 = query(collection(db, "users"), where("username", "==", raw));
     const r1 = await getDocs(q1);
@@ -74,13 +78,64 @@ function getStoredHash(u) {
   return String(u?.passHash || u?.passhash || u?.passwordHash || "").toLowerCase();
 }
 
+const DEFAULT_CARDS = [
+  {
+    icon: "🔒",
+    title: "Mantente atento a estafas",
+    body: "Nunca compartas tu clave. Si alguien te pide datos por teléfono o WhatsApp, desconfía y verifica por canales oficiales.",
+  },
+  {
+    icon: "📣",
+    title: "Comunicados del sistema",
+    body: "Aquí podrás ver avisos importantes sobre arriendos, reajustes del mes y recordatorios para el cierre mensual.",
+  },
+];
+
 export default function Login({ onSuccess, onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPass, setShowPass] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  // Info cards desde Firestore
+  const [cards, setCards] = useState(DEFAULT_CARDS);
+
   const canSubmit = useMemo(() => !!username.trim() && !!password, [username, password]);
+
+  useEffect(() => {
+    // Live updates sin redeploy
+    const ref = doc(db, "ui", "login");
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setCards(DEFAULT_CARDS);
+          return;
+        }
+        const d = snap.data() || {};
+        const arr = Array.isArray(d.cards) ? d.cards : null;
+        if (!arr || !arr.length) {
+          setCards(DEFAULT_CARDS);
+          return;
+        }
+        const cleaned = arr
+          .slice(0, 2)
+          .map((c) => ({
+            icon: String(c?.icon || "ℹ️"),
+            title: String(c?.title || "Aviso"),
+            body: String(c?.body || ""),
+          }));
+        setCards(cleaned);
+      },
+      (err) => {
+        console.error("[login cards] onSnapshot error:", err);
+        setCards(DEFAULT_CARDS);
+      }
+    );
+
+    return () => unsub();
+  }, []);
 
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
@@ -99,7 +154,7 @@ export default function Login({ onSuccess, onLogin }) {
       const stored = getStoredHash(u);
 
       if (!stored) {
-        setError("Este usuario no tiene contraseña configurada (passHash).");
+        setError("Este usuario no tiene contraseña configurada.");
         return;
       }
       if (inputHash !== stored) {
@@ -110,7 +165,6 @@ export default function Login({ onSuccess, onLogin }) {
       const role = u.role === "admin" ? "admin" : "viewer";
       const sessionUser = String(u.username || u.id || username).trim();
 
-      // Compat: App.jsx usa onSuccess; dejamos también onLogin por si lo usas en otros lados.
       onSuccess?.({ role, username: sessionUser });
       onLogin?.({ role, username: sessionUser });
     } catch (err) {
@@ -122,43 +176,99 @@ export default function Login({ onSuccess, onLogin }) {
   };
 
   return (
-    <div className="auth-page">
-      <div className="auth-card">
-        <div className="auth-title">Iniciar sesión</div>
+    <div className="login-page">
+      <div className="login-wrap">
+        <div className="login-grid">
+          {/* LEFT: dots + card (todo centrado sobre el cuadro de login) */}
+          <div className="login-leftcol">
+            <div className="login-dots" aria-hidden="true">
+              🔴 🟢 🟡 🔵
+            </div>
 
-        <form onSubmit={handleSubmit}>
-          <div>
-            <label>Usuario</label>
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="tu-usuario"
-              autoFocus
-              autoComplete="username"
-            />
+            <div className="login-card">
+              <div className="login-title">Informe de Arriendos</div>
+              <div className="login-subtitle">Ingresa con tu usuario y contraseña</div>
+
+              <form onSubmit={handleSubmit} className="login-form">
+                <div className="login-field">
+                  <label className="login-label">
+                    <span className="login-label-ico" aria-hidden="true">
+                      👤
+                    </span>
+                    Usuario
+                  </label>
+                  <input
+                    className="login-input"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Ingresa tu usuario"
+                    autoFocus
+                    autoComplete="username"
+                  />
+                </div>
+
+                <div className="login-field">
+                  <label className="login-label">
+                    <span className="login-label-ico" aria-hidden="true">
+                      🔑
+                    </span>
+                    Contraseña
+                  </label>
+
+                  <div className="login-pass">
+                    <input
+                      className="login-input"
+                      type={showPass ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Ingresa tu clave"
+                      autoComplete="current-password"
+                    />
+
+                    <button
+                      type="button"
+                      className="login-pass-toggle"
+                      onClick={() => setShowPass((s) => !s)}
+                      aria-label={showPass ? "Ocultar contraseña" : "Mostrar contraseña"}
+                      title={showPass ? "Ocultar" : "Mostrar"}
+                    >
+                      {showPass ? "🙈" : "👁️"}
+                    </button>
+                  </div>
+                </div>
+
+                {error && <div className="login-error">{error}</div>}
+
+                <button className="login-btn" type="submit" disabled={!canSubmit || busy}>
+                  {busy ? "Ingresando..." : "Ingresar"}
+                </button>
+
+                <div className="login-footnote">🔔 Por ahora sin recuperar clave.</div>
+              </form>
+            </div>
           </div>
 
-          <div>
-            <label>Contraseña</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              autoComplete="current-password"
-            />
+          {/* RIGHT: cards + mascot */}
+          <div className="login-side">
+            <div className="login-info">
+              {cards.map((c, idx) => (
+                <div className="login-info-card" key={`${c.title}-${idx}`}>
+                  <div className="login-info-icon" aria-hidden="true">
+                    {c.icon}
+                  </div>
+                  <div className="login-info-text">
+                    <div className="login-info-title">{c.title}</div>
+                    <div className="login-info-body">{c.body}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="login-mascot">
+              <img src={mascotImg} alt="Mascota" />
+            </div>
           </div>
-
-          {error && <div className="auth-error">{error}</div>}
-
-          <div className="auth-actions">
-            <button className="btn" type="submit" disabled={!canSubmit || busy}>
-              {busy ? "Ingresando..." : "Ingresar"}
-            </button>
-          </div>
-        </form>
-
-        <div className="auth-note">Si no recuerdas tu usuario/clave, entra con un admin y ve a “Adm pass”.</div>
+        </div>
       </div>
     </div>
   );

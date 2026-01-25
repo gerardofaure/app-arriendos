@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
-  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -11,6 +10,7 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase.js";
 import "./styles/App.css";
+
 import OwnerGroup from "./components/OwnerGroup.jsx";
 import PropertyHistoryModal from "./components/PropertyHistoryModal.jsx";
 import MessagesModal from "./components/MessagesModal.jsx";
@@ -60,19 +60,17 @@ function monthIdFromDate(d) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
+
 function labelFromMonthId(id) {
   const [y, m] = String(id || "").split("-");
+  const yy = Number(y || 2000);
   const mm = Number(m || 1);
-  const date = new Date(Number(y || 2000), mm - 1, 1);
-  return date.toLocaleDateString("es-CL", { month: "long", year: "numeric" }).replace(/^\w/, (c) => c.toUpperCase());
+  const date = new Date(yy, mm - 1, 1);
+  const monthName = date.toLocaleDateString("es-CL", { month: "long" });
+  const cap = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+  return `${cap} ${yy}`; // “Enero 2026”
 }
 
-function monthNameFromMonthId(id) {
-  const [, m] = String(id || "").split("-");
-  const mm = Number(m || 1);
-  const date = new Date(2000, mm - 1, 1);
-  return date.toLocaleDateString("es-CL", { month: "long" }).replace(/^\w/, (c) => c.toUpperCase());
-}
 function prevMonthId(monthId) {
   const [y, m] = String(monthId || "").split("-");
   const yy = Number(y || 2000);
@@ -87,41 +85,50 @@ function prevMonthId(monthId) {
 export default function App() {
   const today = new Date();
 
-  // Login simple (según tu app)
+  // Login
   const [role, setRole] = useState(null); // "admin" | "viewer" | null
   const [username, setUsername] = useState("");
 
   // Vista
   const [viewMode, setViewMode] = useState("MONTH"); // "MONTH" | "YEAR"
 
-  // Mes
+  // ✅ Mes base fijo (mes actual) para construir opciones
+  const baseMonthId = useMemo(() => monthIdFromDate(new Date()), []);
+
+  // Mes seleccionado (lo que se visualiza)
   const [selectedMonthId, setSelectedMonthId] = useState(monthIdFromDate(today));
-  const [headerMonthOpen, setHeaderMonthOpen] = useState(false);
-
-  // Selector de mes en cascada: primero año, luego mes
-  const [monthYear, setMonthYear] = useState(today.getFullYear());
-
   const prevMonthIdValue = useMemo(() => prevMonthId(selectedMonthId), [selectedMonthId]);
 
-  // Año
+  // Año derivado del mes (compatibilidad YEAR)
   const [selectedYear, setSelectedYear] = useState(today.getFullYear());
+  useEffect(() => {
+    const y = Number(String(selectedMonthId || "").split("-")[0] || new Date().getFullYear());
+    if (!Number.isNaN(y)) setSelectedYear(y);
+  }, [selectedMonthId]);
 
-  // Datos
+  // Owners estructura
   const [owners, setOwners] = useState([]);
   const [ownerFilter, setOwnerFilter] = useState("ALL");
 
+  // Datos rentas
   const [dataCurrent, setDataCurrent] = useState({});
   const [dataPrev, setDataPrev] = useState({});
   const [dataAnnual, setDataAnnual] = useState({});
-
   const [loading, setLoading] = useState(false);
 
   // Edición
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Opciones dropdown
+  // Dropdown Opciones
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsRef = useRef(null);
+
+  // ✅ Dropdown Mes y Empresas (como botones)
+  const [monthMenuOpen, setMonthMenuOpen] = useState(false);
+  const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
+  const monthRef = useRef(null);
+  const ownerRef = useRef(null);
 
   // Mensajes
   const [messagesOpen, setMessagesOpen] = useState(false);
@@ -134,14 +141,15 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyData, setHistoryData] = useState([]);
   const [historyContract, setHistoryContract] = useState(null);
+
   const [showReajustesModal, setShowReajustesModal] = useState(false);
   const [showAdminPass, setShowAdminPass] = useState(false);
 
-  // Contratos (cache) para Reajustes del mes
+  // Contratos para Reajustes
   const [contractsMap, setContractsMap] = useState({}); // { canonicalId: contractData }
   const [contractsBusy, setContractsBusy] = useState(false);
 
-  // Confirmación de contraseña (reutilizable)
+  // Confirmación contraseña
   const [confirmPassOpen, setConfirmPassOpen] = useState(false);
   const [confirmPassConfig, setConfirmPassConfig] = useState({
     title: "Confirmar contraseña",
@@ -153,38 +161,23 @@ export default function App() {
   // Toast
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
 
-  // Refs para dropdowns
-  const monthRef = useRef(null);
-  const optionsRef = useRef(null);
-
   const appTitle = "INFORME MENSUAL DE ARRIENDOS";
 
-  const activeMonthName = useMemo(() => monthNameFromMonthId(selectedMonthId), [selectedMonthId]);
+  // ✅ Opciones de Mes (SIEMPRE mes actual -> 12 meses atrás)
+  const monthOptions = useMemo(() => {
+    const out = [];
+    let cur = baseMonthId;
+    for (let i = 0; i < 12; i++) {
+      out.push({ id: cur, label: labelFromMonthId(cur) });
+      cur = prevMonthId(cur);
+    }
+    return out;
+  }, [baseMonthId]);
 
-  // Lista de meses: toma los docs existentes en rents (más robusto)
-  const [monthList, setMonthList] = useState([]);
-
-  // Mantener monthYear sincronizado con el mes seleccionado
-  useEffect(() => {
-    const y = Number(String(selectedMonthId || "").split("-")[0] || 0);
-    if (y && y !== monthYear) setMonthYear(y);
-  }, [selectedMonthId]);
-
-  const availableYears = useMemo(() => {
-    const set = new Set((monthList || []).map((m) => m.year).filter(Boolean));
-    return Array.from(set).sort((a, b) => b - a);
-  }, [monthList]);
-
-  const monthsForYear = useMemo(() => {
-    return (monthList || [])
-      .filter((m) => Number(m.year) === Number(monthYear))
-      .sort((a, b) => Number(b.monthNum) - Number(a.monthNum));
-  }, [monthList, monthYear]);
+  const months = useMemo(() => monthOptions.map((m) => m.id), [monthOptions]);
 
   /* =========================
      Sesión (localStorage)
-     - Solo persiste username + role.
-     - La validación de contraseña ocurre en Login.
   ========================= */
   useEffect(() => {
     try {
@@ -195,9 +188,7 @@ export default function App() {
         setRole(parsed.role);
         setUsername(parsed.username);
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -207,13 +198,11 @@ export default function App() {
       } else {
         localStorage.removeItem("app_arriendos_session");
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [role, username]);
 
   /* =========================
-     Utils UI
+     UI helpers
   ========================= */
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
@@ -227,19 +216,20 @@ export default function App() {
   };
 
   /* =========================
-     Click-outside: dropdowns
+     Click-outside: cerrar dropdowns
   ========================= */
   useEffect(() => {
     const onDown = (e) => {
-      if (headerMonthOpen && monthRef.current && !monthRef.current.contains(e.target)) setHeaderMonthOpen(false);
       if (optionsOpen && optionsRef.current && !optionsRef.current.contains(e.target)) setOptionsOpen(false);
+      if (monthMenuOpen && monthRef.current && !monthRef.current.contains(e.target)) setMonthMenuOpen(false);
+      if (ownerMenuOpen && ownerRef.current && !ownerRef.current.contains(e.target)) setOwnerMenuOpen(false);
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
-  }, [headerMonthOpen, optionsOpen]);
+  }, [optionsOpen, monthMenuOpen, ownerMenuOpen]);
 
   /* =========================
-     Cargar estructura: "structure"
+     Cargar owners
   ========================= */
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "structure", "owners"), (snap) => {
@@ -251,46 +241,24 @@ export default function App() {
   }, []);
 
   /* =========================
-     Lista meses desde colección rents
-     (para que siempre “lea” meses anteriores que existan)
+     Unread mensajes
   ========================= */
   useEffect(() => {
-    (async () => {
-      try {
-        const snap = await getDocs(collection(db, "rents"));
-        const ids = snap.docs.map((d) => d.id).filter(Boolean);
-
-        // Orden desc por YYYY-MM
-        ids.sort((a, b) => (a < b ? 1 : -1));
-
-        const list = ids.map((id) => {
-          const [yy, mm] = String(id || "").split("-");
-          const year = Number(yy || 0);
-          const monthNum = Number(mm || 0);
-          return {
-            id,
-            year,
-            monthNum,
-            monthName: monthNameFromMonthId(id),
-            label: labelFromMonthId(id),
-          };
-        });
-        setMonthList(list);
-
-        // Si el mes actual no existe, caer al más reciente existente
-        if (list.length && !ids.includes(selectedMonthId)) {
-          setSelectedMonthId(list[0].id);
-          if (list[0].year) setMonthYear(list[0].year);
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!role) return;
+    const unsub = onSnapshot(
+      doc(db, "meta", "messages"),
+      (snap) => {
+        const d = snap.exists() ? snap.data() || {} : {};
+        const unread = role === "admin" ? !!d.unreadForAdmin : !!d.unreadForViewer;
+        setMessagesUnread(unread);
+      },
+      () => setMessagesUnread(false)
+    );
+    return () => unsub();
+  }, [role]);
 
   /* =========================
-     Lectura MES: rents/<YYYY-MM>
+     Lectura MES
   ========================= */
   useEffect(() => {
     if (viewMode !== "MONTH") return;
@@ -316,17 +284,13 @@ export default function App() {
     );
 
     return () => {
-      try {
-        unsubCurr && unsubCurr();
-      } catch {}
-      try {
-        unsubPrev && unsubPrev();
-      } catch {}
+      try { unsubCurr && unsubCurr(); } catch {}
+      try { unsubPrev && unsubPrev(); } catch {}
     };
   }, [viewMode, selectedMonthId, prevMonthIdValue]);
 
   /* =========================
-     Lectura AÑO: suma rents del año
+     Lectura AÑO
   ========================= */
   useEffect(() => {
     if (viewMode !== "YEAR") return;
@@ -368,7 +332,7 @@ export default function App() {
   }, [viewMode, selectedYear]);
 
   /* =========================
-     Historial + contrato (PropertyHistoryModal)
+     Historial
   ========================= */
   useEffect(() => {
     if (!historyOpen) return;
@@ -377,15 +341,11 @@ export default function App() {
     (async () => {
       setHistoryLoading(true);
       try {
-        // 1) Contrato
         const cid = canonicalContractId(historyOwner, historyProperty);
         const cSnap = await getDoc(doc(db, "contracts", cid));
         setHistoryContract(cSnap.exists() ? cSnap.data() || null : null);
 
-        // 2) Últimos 12 meses disponibles (según rents existentes)
-        const months = (monthList || []).map((m) => m.id);
-        const top12 = months.slice(0, 12).slice().reverse(); // asc para el gráfico
-
+        const top12 = months.slice(0, 12).slice().reverse(); // asc
         const docs = await Promise.all(
           top12.map(async (id) => {
             const s = await getDoc(doc(db, "rents", id));
@@ -398,11 +358,7 @@ export default function App() {
           const ownerBlock = ownerKey ? data[ownerKey] : {};
           const propKey = pickKeyCI(ownerBlock, historyProperty);
           const value = propKey ? Number(ownerBlock[propKey] || 0) : 0;
-          return {
-            monthId: id,
-            monthLabel: labelFromMonthId(id),
-            value,
-          };
+          return { monthId: id, monthLabel: labelFromMonthId(id), value };
         });
 
         setHistoryData(series);
@@ -414,10 +370,10 @@ export default function App() {
         setHistoryLoading(false);
       }
     })();
-  }, [historyOpen, historyOwner, historyProperty, monthList]);
+  }, [historyOpen, historyOwner, historyProperty, months]);
 
   /* =========================
-     Cargar contratos (solo al abrir Reajustes)
+     Contratos (reajustes)
   ========================= */
   useEffect(() => {
     if (!showReajustesModal) return;
@@ -428,9 +384,7 @@ export default function App() {
       try {
         const snap = await getDocs(collection(db, "contracts"));
         const map = {};
-        snap.forEach((d) => {
-          map[d.id] = d.data() || {};
-        });
+        snap.forEach((d) => (map[d.id] = d.data() || {}));
         setContractsMap(map);
       } catch (e) {
         console.error(e);
@@ -475,17 +429,12 @@ export default function App() {
     return sum;
   }, [owners, dataAnnual]);
 
-  /* =========================
-     Acciones opciones (tu lógica original)
-  ========================= */
   const showTotals = () => showToast("Totales listos", "info");
   const showMissing = () => showToast("Revisando contratos faltantes…", "info");
 
   /* =========================
      Render
   ========================= */
-
-  // Login centrado al iniciar
   if (!role || !username) {
     return (
       <Login
@@ -497,12 +446,12 @@ export default function App() {
     );
   }
 
+  const monthBtnLabel = labelFromMonthId(selectedMonthId);
+  const ownerBtnLabel = ownerFilter === "ALL" ? "Empresas: Todas" : `Empresas: ${ownerFilter}`;
+
   return (
     <div className="app-shell">
       <div className="app-card">
-        {/* =========================
-            HEADER
-        ========================= */}
         <header className="app-header">
           <div className="header-grid">
             {/* LEFT */}
@@ -519,7 +468,8 @@ export default function App() {
                     setOwnerFilter("ALL");
                     setMessagesOpen(false);
                     setOptionsOpen(false);
-                    setHeaderMonthOpen(false);
+                    setMonthMenuOpen(false);
+                    setOwnerMenuOpen(false);
                   }}
                   title="Cerrar sesión"
                 >
@@ -528,82 +478,86 @@ export default function App() {
               </div>
 
               <div className="header-left-controls">
-                {/* Selector de Mes / Año */}
-                {viewMode === "MONTH" && (
-                  <div className="month-cascade">
-                    <select
-                      className="header-select"
-                      value={monthYear}
-                      onChange={(e) => {
-                        const nextY = Number(e.target.value);
-                        setMonthYear(nextY);
-                        setHeaderMonthOpen(false);
+                {/* ✅ MES como BOTÓN */}
+                <div className="hc-block header-action" ref={monthRef}>
+                  <button
+                    className="btn header-action"
+                    onClick={() => {
+                      setMonthMenuOpen((v) => !v);
+                      setOwnerMenuOpen(false);
+                      setOptionsOpen(false);
+                    }}
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded={monthMenuOpen ? "true" : "false"}
+                  >
+                    {monthBtnLabel} <span className="hc-caret">▾</span>
+                  </button>
 
-                        const latestInYear = (monthList || [])
-                          .filter((m) => Number(m.year) === Number(nextY))
-                          .sort((a, b) => Number(b.monthNum) - Number(a.monthNum))[0];
-
-                        if (latestInYear?.id) setSelectedMonthId(latestInYear.id);
-                      }}
-                    >
-                      {(availableYears.length ? availableYears : [monthYear]).map((y) => (
-                        <option key={y} value={y}>
-                          {y}
-                        </option>
+                  {monthMenuOpen && (
+                    <div className="hc-menu">
+                      {monthOptions.map((m) => (
+                        <button
+                          key={m.id}
+                          className="hc-item"
+                          onClick={() => {
+                            setSelectedMonthId(m.id);
+                            setMonthMenuOpen(false);
+                          }}
+                          type="button"
+                        >
+                          {m.label}
+                        </button>
                       ))}
-                    </select>
+                    </div>
+                  )}
+                </div>
 
-                    <div className="hc-block" ref={monthRef}>
-                      <button className="hc-button" onClick={() => setHeaderMonthOpen((s) => !s)}>
-                        {activeMonthName} <span className="hc-caret">▾</span>
+                {/* ✅ EMPRESAS como BOTÓN */}
+                <div className="hc-block header-action" ref={ownerRef}>
+                  <button
+                    className="btn header-action"
+                    onClick={() => {
+                      setOwnerMenuOpen((v) => !v);
+                      setMonthMenuOpen(false);
+                      setOptionsOpen(false);
+                    }}
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded={ownerMenuOpen ? "true" : "false"}
+                  >
+                    {ownerBtnLabel} <span className="hc-caret">▾</span>
+                  </button>
+
+                  {ownerMenuOpen && (
+                    <div className="hc-menu">
+                      <button
+                        className="hc-item"
+                        onClick={() => {
+                          setOwnerFilter("ALL");
+                          setOwnerMenuOpen(false);
+                        }}
+                        type="button"
+                      >
+                        Todas
                       </button>
 
-                      {headerMonthOpen && (
-                        <div className="hc-menu">
-                          {(monthsForYear.length ? monthsForYear : monthList).map((m) => (
-                            <button
-                              key={m.id}
-                              className="hc-item"
-                              onClick={() => {
-                                setSelectedMonthId(m.id);
-                                setHeaderMonthOpen(false);
-                              }}
-                            >
-                              {m.monthName || monthNameFromMonthId(m.id)}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      {(owners || []).map((o) => (
+                        <button
+                          key={o.name}
+                          className="hc-item"
+                          onClick={() => {
+                            setOwnerFilter(o.name);
+                            setOwnerMenuOpen(false);
+                          }}
+                          type="button"
+                        >
+                          {o.name}
+                        </button>
+                      ))}
                     </div>
-                  </div>
-                )}
-
-                {viewMode === "YEAR" && (
-                  <select
-                    className="header-select"
-                    value={selectedYear}
-                    onChange={(e) => setSelectedYear(Number(e.target.value))}
-                  >
-                    {Array.from({ length: 10 }).map((_, i) => {
-                      const y = today.getFullYear() - i;
-                      return (
-                        <option key={y} value={y}>
-                          {y}
-                        </option>
-                      );
-                    })}
-                  </select>
-                )}
-
-                {/* Selector Empresa */}
-                <select className="header-select" value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}>
-                  <option value="ALL">Todos</option>
-                  {(owners || []).map((o) => (
-                    <option key={o.name} value={o.name}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -612,6 +566,7 @@ export default function App() {
               <button
                 className={messagesUnread ? "btn with-dot header-action" : "btn header-action"}
                 onClick={() => setMessagesOpen(true)}
+                type="button"
               >
                 Mensajes
               </button>
@@ -625,12 +580,21 @@ export default function App() {
                   }
                   setEditing((e) => !e);
                 }}
+                type="button"
               >
                 {editing ? "Salir edición" : "Entrar edición"}
               </button>
 
               <div className="hc-block header-action" ref={optionsRef}>
-                <button className="hc-button" onClick={() => setOptionsOpen((s) => !s)}>
+                <button
+                  className="hc-button"
+                  onClick={() => {
+                    setOptionsOpen((s) => !s);
+                    setMonthMenuOpen(false);
+                    setOwnerMenuOpen(false);
+                  }}
+                  type="button"
+                >
                   Opciones <span className="hc-caret">▾</span>
                 </button>
 
@@ -644,6 +608,7 @@ export default function App() {
                         setViewMode("MONTH");
                         setOptionsOpen(false);
                       }}
+                      type="button"
                     >
                       Mes
                     </button>
@@ -654,6 +619,7 @@ export default function App() {
                         setViewMode("YEAR");
                         setOptionsOpen(false);
                       }}
+                      type="button"
                     >
                       Año
                     </button>
@@ -687,28 +653,17 @@ export default function App() {
                             },
                           });
                         }}
+                        type="button"
                       >
                         {saving ? "Guardando..." : "Guardar cambios"}
                       </button>
                     )}
 
-                    <button
-                      className="hc-item"
-                      onClick={() => {
-                        showTotals();
-                        setOptionsOpen(false);
-                      }}
-                    >
+                    <button className="hc-item" onClick={() => { showTotals(); setOptionsOpen(false); }} type="button">
                       Totales
                     </button>
 
-                    <button
-                      className="hc-item"
-                      onClick={() => {
-                        showMissing();
-                        setOptionsOpen(false);
-                      }}
-                    >
+                    <button className="hc-item" onClick={() => { showMissing(); setOptionsOpen(false); }} type="button">
                       Contratos faltantes
                     </button>
 
@@ -721,6 +676,7 @@ export default function App() {
                             setShowReajustesModal(true);
                             setOptionsOpen(false);
                           }}
+                          type="button"
                         >
                           Reajustes del mes
                         </button>
@@ -736,6 +692,7 @@ export default function App() {
                             setShowAdminPass(true);
                             setOptionsOpen(false);
                           }}
+                          type="button"
                         >
                           Adm pass
                         </button>
@@ -745,7 +702,7 @@ export default function App() {
                 )}
               </div>
 
-              <button className="btn btn-secondary header-action">
+              <button className="btn btn-secondary header-action" type="button">
                 Total general: {moneyCLP0(viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear)}
               </button>
             </div>
@@ -775,7 +732,8 @@ export default function App() {
                         setDataCurrent((prev) => {
                           const ok = pickKeyCI(prev, ownerName) ?? ownerName;
                           const od = prev?.[ok] || {};
-                          const propKey = Object.keys(od).find((k) => norm(k) === norm(propertyName)) ?? propertyName;
+                          const propKey =
+                            Object.keys(od).find((k) => norm(k) === norm(propertyName)) ?? propertyName;
                           return { ...prev, [ok]: { ...od, [propKey]: newValue } };
                         });
                       }}
@@ -784,7 +742,8 @@ export default function App() {
                           const ok = pickKeyCI(prev, ownerName) ?? ownerName;
                           const od = prev?.[ok] || {};
                           const obsKey =
-                            Object.keys(od).find((k) => norm(k) === norm(`${propertyName}__obs`)) ?? `${propertyName}__obs`;
+                            Object.keys(od).find((k) => norm(k) === norm(`${propertyName}__obs`)) ??
+                            `${propertyName}__obs`;
                           return { ...prev, [ok]: { ...od, [obsKey]: newObs } };
                         });
                       }}
@@ -829,7 +788,9 @@ export default function App() {
                         <div key={`${ownerName}-${propName}`} className="annual-row">
                           <div>{ownerName}</div>
                           <div>{propName}</div>
-                          <div style={{ textAlign: "right", fontWeight: 900 }}>{moneyCLP0(block[propName])}</div>
+                          <div style={{ textAlign: "right", fontWeight: 900 }}>
+                            {moneyCLP0(block[propName])}
+                          </div>
                         </div>
                       ));
                   })}
@@ -838,10 +799,8 @@ export default function App() {
           )}
         </main>
 
-        {/* Toast */}
         {toast.show && <div className={`toast ${toast.type}`}>{toast.message}</div>}
 
-        {/* Modales */}
         {historyOpen && (
           <PropertyHistoryModal
             open={historyOpen}

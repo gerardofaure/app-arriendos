@@ -44,14 +44,12 @@ const canonicalDocId = (owner, property) => `${normId(owner)}__${normId(property
 const isDateDDMMYYYY = (v) => /^\d{2}-\d{2}-\d{4}$/.test(String(v || ""));
 
 function stripToEditableNumber(raw) {
-  // Para editar: deja números, coma, punto y signo (sin $ ni UF ni letras)
   return String(raw || "").replace(/[^\d,.\-]/g, "");
 }
 
 function parseNumberLoose(raw) {
   const s = String(raw || "").trim();
   if (!s) return null;
-  // Miles con punto -> los removemos, decimales con coma -> punto
   const normalized = s.replace(/\./g, "").replace(",", ".");
   const n = Number(normalized);
   return Number.isFinite(n) ? n : null;
@@ -60,8 +58,8 @@ function parseNumberLoose(raw) {
 function formatCLP(rawNumeric) {
   const n = typeof rawNumeric === "number" ? rawNumeric : parseNumberLoose(rawNumeric);
   if (n === null) return "";
-  const intVal = Math.round(Math.abs(n)) * (n < 0 ? -1 : 1);
-  return `$${Math.abs(intVal).toLocaleString("es-CL")}${intVal < 0 ? "-" : ""}`.replace("0-", "-0"); // edge
+  const intVal = Math.round(n);
+  return `$${Math.abs(intVal).toLocaleString("es-CL")}`.replace("$-", "-$");
 }
 
 function formatUF(rawNumeric) {
@@ -104,11 +102,11 @@ function MiniLineChart({ data = [], width = 360, height = 120, strokeWidth = 2 }
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" className="sparkline">
-      <polyline fill="none" stroke="#0d6efd" strokeWidth={strokeWidth} points={points.join(" ")} />
+      <polyline fill="none" stroke="currentColor" strokeWidth={strokeWidth} points={points.join(" ")} />
       {vals.map((v, i) => {
         const x = pad + i * stepX;
         const y = pad + innerH - ((v - min) / span) * innerH;
-        return <circle key={i} cx={x} cy={y} r="3" fill="#0d6efd" />;
+        return <circle key={i} cx={x} cy={y} r="3" fill="currentColor" />;
       })}
     </svg>
   );
@@ -137,17 +135,16 @@ export default function PropertyHistoryModal({
   const [correoAval, setCorreoAval] = useState("");
   const [telefonoAval, setTelefonoAval] = useState("");
   const [contratoUrl, setContratoUrl] = useState("");
-  const [reajuste, setReajuste] = useState([]); // [1..12]
+  const [reajuste, setReajuste] = useState([]);
 
-  /* MONTO + UNIDAD (SIN CONVERTIR) */
+  /* MONTO + UNIDAD */
   const [valorStr, setValorStr] = useState("");
-  const [valorUnit, setValorUnit] = useState("CLP"); // "CLP" | "UF"
+  const [valorUnit, setValorUnit] = useState("CLP");
   const [multaStr, setMultaStr] = useState("");
   const [multaUnit, setMultaUnit] = useState("CLP");
   const [garStr, setGarStr] = useState("");
   const [garUnit, setGarUnit] = useState("CLP");
 
-  // cargar contract al abrir/cambiar
   useEffect(() => {
     if (!open) return;
 
@@ -164,7 +161,6 @@ export default function PropertyHistoryModal({
     setTelefonoAval(pick(contract, ["telefonoAval", "phoneAval"]) || "");
     setContratoUrl(pick(contract, ["contratoPdfUrl", "pdfUrl", "contratoUrl", "contrato"]) || "");
 
-    // NUEVOS CAMPOS (AMOUNT + UNIT) - fallback a lo viejo
     const vU = pick(contract, ["valorArriendoUnit"]) || (pick(contract, ["valorArriendoUF"]) ? "UF" : "CLP");
     const vA =
       pick(contract, ["valorArriendoAmount"]) ??
@@ -191,44 +187,89 @@ export default function PropertyHistoryModal({
 
     const raw = pick(contract, ["reajuste", "mesesReajuste", "reajustes"]);
     if (Array.isArray(raw)) {
-      const clean = raw
-        .map((m) => Number(String(m).replace(/\D/g, "")))
-        .filter((x) => x >= 1 && x <= 12);
+      const clean = raw.map((m) => Number(String(m).replace(/\D/g, ""))).filter((x) => x >= 1 && x <= 12);
       setReajuste(clean);
     } else {
       setReajuste([]);
     }
   }, [contract, ownerName, propertyName, open]);
 
-  const series = useMemo(() => history.map((h) => Number(h?.value || 0)), [history]);
-  const bubbles = useMemo(
-    () =>
-      history
-        .slice()
-        .reverse()
-        .map((h, i) => ({
-          key: `${h.monthId}_${i}`,
-          label: h.monthLabel || h.monthId || "",
-          value: Number(h.value || 0),
-        })),
-    [history]
-  );
+  // ✅ Últimos 6 meses
+  const last6History = useMemo(() => (Array.isArray(history) ? history.slice(-6) : []), [history]);
+
+  // Chart
+  const series = useMemo(() => last6History.map((h) => Number(h?.value || 0)), [last6History]);
+
+  // Filas tabla (más nuevo arriba)
+  const rows = useMemo(() => {
+    const list = last6History.slice().reverse();
+    return list.map((h, idx) => {
+      const label = capWords(h.monthLabel || h.monthId || "");
+      const value = Number(h?.value || 0);
+      return {
+        key: `${h.monthId}_${idx}`,
+        label,
+        amountText: `$${value.toLocaleString("es-CL")}`,
+      };
+    });
+  }, [last6History]);
+
+  // Tabla contrato (label/value) mismo estilo
+  const contratoRowsView = useMemo(() => {
+    const reaj = reajuste.length ? reajuste.map((m) => MESES_ABR[m - 1]).join("-") : "---";
+    const contratoTxt = contratoUrl ? "Ver contrato PDF" : "No disponible";
+
+    const vDisplay = formatByUnit(parseNumberLoose(valorStr), valorUnit);
+    const mDisplay = formatByUnit(parseNumberLoose(multaStr), multaUnit);
+    const gDisplay = formatByUnit(parseNumberLoose(garStr), garUnit);
+
+    return [
+      { k: "Dirección", v: direccion || "---" },
+      { k: "Arrendatario", v: arrendatario || "---" },
+      { k: "Inicio", v: inicio || "---" },
+      { k: "Término", v: vence || "---" },
+      { k: "Valor arriendo", v: vDisplay },
+      { k: "Multa", v: mDisplay },
+      { k: "Garantía", v: gDisplay },
+      { k: "Correo", v: correo || "---" },
+      { k: "Teléfono", v: telefono || "---" },
+      { k: "Aval", v: aval || "---" },
+      { k: "Correo aval", v: correoAval || "---" },
+      { k: "Teléfono aval", v: telefonoAval || "---" },
+      { k: "Reajuste", v: reaj },
+      { k: "Contrato", v: contratoTxt, isLink: !!contratoUrl },
+    ];
+  }, [
+    direccion,
+    arrendatario,
+    inicio,
+    vence,
+    valorStr,
+    valorUnit,
+    multaStr,
+    multaUnit,
+    garStr,
+    garUnit,
+    correo,
+    telefono,
+    aval,
+    correoAval,
+    telefonoAval,
+    reajuste,
+    contratoUrl,
+  ]);
 
   if (!open) return null;
 
   const monthChipActive = (m) => reajuste.includes(m);
-  const toggleMonth = (m) => {
+  const toggleMonth = (m) =>
     setReajuste((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m].sort((a, b) => a - b)));
-  };
+
   const invalidInicio = editing && inicio && !isDateDDMMYYYY(inicio);
   const invalidVence = editing && vence && !isDateDDMMYYYY(vence);
-
   const canSave = role === "admin" && !invalidInicio && !invalidVence;
 
-  const onMoneyFocus = (val, setVal) => {
-    setVal(stripToEditableNumber(val));
-  };
-
+  const onMoneyFocus = (val, setVal) => setVal(stripToEditableNumber(val));
   const onMoneyBlur = (val, unit, setVal) => {
     const n = parseNumberLoose(val);
     if (n === null) {
@@ -242,7 +283,7 @@ export default function PropertyHistoryModal({
     const n = parseNumberLoose(val);
     if (n === null) return 0;
     if (unit === "CLP") return Math.round(n);
-    return Math.round(n * 100) / 100; // UF con 2 decimales máx
+    return Math.round(n * 100) / 100;
   };
 
   const handleSave = async () => {
@@ -260,20 +301,17 @@ export default function PropertyHistoryModal({
       inicio: inicio || "",
       vence: vence || "",
 
-      // NUEVO MODELO: MONTO + UNIDAD (SIN CONVERSIÓN)
       valorArriendoAmount: vNum,
-      valorArriendoUnit: valorUnit, // "CLP" | "UF"
+      valorArriendoUnit: valorUnit,
       multaAmount: mNum,
       multaUnit: multaUnit,
       garantiaAmount: gNum,
       garantiaUnit: garUnit,
 
-      // Compatibilidad con lo antiguo (NO CONVIERTE; SI ES UF, SE DEJA EN 0)
       valorArriendo: valorUnit === "CLP" ? vNum : 0,
       multa: multaUnit === "CLP" ? mNum : 0,
       garantia: garUnit === "CLP" ? gNum : 0,
 
-      // También dejamos los campos separados por unidad por si ya los usabas
       valorArriendoCLP: valorUnit === "CLP" ? vNum : 0,
       valorArriendoUF: valorUnit === "UF" ? vNum : 0,
       multaCLP: multaUnit === "CLP" ? mNum : 0,
@@ -300,10 +338,6 @@ export default function PropertyHistoryModal({
     }
   };
 
-  const vDisplay = formatByUnit(parseNumberLoose(valorStr), valorUnit);
-  const mDisplay = formatByUnit(parseNumberLoose(multaStr), multaUnit);
-  const gDisplay = formatByUnit(parseNumberLoose(garStr), garUnit);
-
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card history-modal" onClick={(e) => e.stopPropagation()}>
@@ -312,115 +346,91 @@ export default function PropertyHistoryModal({
             {ownerName} / {propertyName}
           </div>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div className="modal-actions">
             {role !== "admin" ? (
               <span className="btn btn-secondary btn-xs" title="SOLO LECTURA">
                 Solo lectura
               </span>
             ) : !editing ? (
-              <button className="btn btn-secondary" onClick={() => setEditing(true)}>
+              <button className="btn btn-secondary" onClick={() => setEditing(true)} type="button">
                 Editar
               </button>
             ) : (
               <>
-                <button className="btn" onClick={() => setEditing(false)}>
+                <button className="btn" onClick={() => setEditing(false)} type="button">
                   Cancelar
                 </button>
-                <button className="btn btn-primary" onClick={handleSave} disabled={!canSave}>
+                <button className="btn btn-primary" onClick={handleSave} disabled={!canSave} type="button">
                   Guardar
                 </button>
               </>
             )}
 
-            <button className="modal-close" onClick={onClose}>
+            <button className="modal-close" onClick={onClose} type="button">
               ×
             </button>
           </div>
         </div>
 
         <div className="modal-body history-body">
-          {/* TOP: resumen 6 meses (burbujas estilo WhatsApp) + gráfico a la derecha */}
+          {/* TOP: historial 6 meses + chart */}
           <div className="history-top">
             <div className="history-left">
-              <div className="history-bubble-list">
-                {bubbles.map((b) => (
-                  <div key={b.key} className="history-bubble-row">
-                    <div className="history-wa-bubble">
-                      <div className="history-wa-meta">
-                        <span className="history-wa-from">{capWords(b.label)}</span>
-                      </div>
-                      <div className="history-wa-text">{`$${Number(b.value || 0).toLocaleString("es-CL")}`}</div>
+              <div className="history-table">
+                <div className="history-table-head">
+                  <div className="history-col-left">Mes</div>
+                  <div className="history-col-right">Arriendo</div>
+                </div>
+
+                <div className="history-table-body">
+                  {rows.map((r) => (
+                    <div key={r.key} className="history-row">
+                      <div className="history-col-left">{r.label}</div>
+                      <div className="history-col-right">{r.amountText}</div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
+
             <div className="history-right">
-              <MiniLineChart data={series} />
+              <div className="history-chart">
+                <MiniLineChart data={series} />
+              </div>
             </div>
           </div>
 
-          {/* CONTRATO */}
+          {/* CONTRATO en TABLA mismo estilo */}
           <div className="contract-card">
             <div className="section-title">Detalle de contrato</div>
 
             {!editing ? (
-              <div className="contract-grid">
-                <div className="c-label">Dirección</div>
-                <div className="c-val">{direccion || "---"}</div>
-
-                <div className="c-label">Inicio</div>
-                <div className="c-val">{inicio || "---"}</div>
-
-                <div className="c-label">Vence</div>
-                <div className="c-val">{vence || "---"}</div>
-
-                <div className="c-label">Valor arriendo</div>
-                <div className="c-val">{vDisplay}</div>
-
-                <div className="c-label">Multa</div>
-                <div className="c-val">{mDisplay}</div>
-
-                <div className="c-label">Garantía</div>
-                <div className="c-val">{gDisplay}</div>
-
-                <div className="c-label">Arrendatario</div>
-                <div className="c-val">{arrendatario || "---"}</div>
-
-                <div className="c-label">Correo</div>
-                <div className="c-val">{correo || "---"}</div>
-
-                <div className="c-label">Teléfono</div>
-                <div className="c-val">{telefono || "---"}</div>
-
-                <div className="c-label">Aval</div>
-                <div className="c-val">{aval || "---"}</div>
-
-                <div className="c-label">Correo aval</div>
-                <div className="c-val">{correoAval || "---"}</div>
-
-                <div className="c-label">Teléfono aval</div>
-                <div className="c-val">{telefonoAval || "---"}</div>
-
-                <div className="c-label">Contrato</div>
-                <div className="c-val">
-                  {contratoUrl ? (
-                    <a href={contratoUrl} target="_blank" rel="noreferrer" className="c-link">
-                      Contrato PDF - {propertyName}
-                    </a>
-                  ) : (
-                    "No disponible"
-                  )}
-                </div>
-
-                <div className="c-label">Reajuste</div>
-                <div className="c-val">{reajuste.length ? reajuste.map((m) => MESES_ABR[m - 1]).join("-") : "---"}</div>
+              <div className="info-table">
+                {contratoRowsView.map((r) => (
+                  <div key={r.k} className="info-row">
+                    <div className="info-key">{r.k}</div>
+                    <div className="info-val">
+                      {r.isLink && contratoUrl ? (
+                        <a href={contratoUrl} target="_blank" rel="noreferrer" className="info-link">
+                          {r.v} - {propertyName}
+                        </a>
+                      ) : (
+                        r.v
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : (
               <div className="contract-grid">
                 <div className="c-label">Dirección</div>
                 <div>
                   <input className="inline-input" value={direccion} onChange={(e) => setDireccion(e.target.value)} />
+                </div>
+
+                <div className="c-label">Arrendatario</div>
+                <div>
+                  <input className="inline-input" value={arrendatario} onChange={(e) => setArrendatario(e.target.value)} />
                 </div>
 
                 <div className="c-label">Inicio</div>
@@ -434,7 +444,7 @@ export default function PropertyHistoryModal({
                   />
                 </div>
 
-                <div className="c-label">Vence</div>
+                <div className="c-label">Término</div>
                 <div>
                   <input
                     className="inline-input"
@@ -445,7 +455,6 @@ export default function PropertyHistoryModal({
                   />
                 </div>
 
-                {/* VALOR ARRIENDO: INPUT + SELECTOR */}
                 <div className="c-label">Valor arriendo</div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <input
@@ -463,7 +472,6 @@ export default function PropertyHistoryModal({
                   </select>
                 </div>
 
-                {/* MULTA */}
                 <div className="c-label">Multa</div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <input
@@ -481,7 +489,6 @@ export default function PropertyHistoryModal({
                   </select>
                 </div>
 
-                {/* GARANTÍA */}
                 <div className="c-label">Garantía</div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <input
@@ -497,11 +504,6 @@ export default function PropertyHistoryModal({
                     <option value="CLP">PESOS</option>
                     <option value="UF">UF</option>
                   </select>
-                </div>
-
-                <div className="c-label">Arrendatario</div>
-                <div>
-                  <input className="inline-input" value={arrendatario} onChange={(e) => setArrendatario(e.target.value)} />
                 </div>
 
                 <div className="c-label">Correo</div>
@@ -531,12 +533,7 @@ export default function PropertyHistoryModal({
 
                 <div className="c-label">Contrato (URL)</div>
                 <div>
-                  <input
-                    className="inline-input"
-                    value={contratoUrl}
-                    onChange={(e) => setContratoUrl(e.target.value)}
-                    placeholder="https://..."
-                  />
+                  <input className="inline-input" value={contratoUrl} onChange={(e) => setContratoUrl(e.target.value)} placeholder="https://..." />
                 </div>
 
                 <div className="c-label">Reajuste</div>

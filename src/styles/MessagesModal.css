@@ -1,5 +1,8 @@
 /* ============================================================
    Módulo Mensajes (modal estilo WhatsApp)
+   - Fecha centrada
+   - Fuente Helvetica
+   - Hora abajo a la derecha (estilo WhatsApp)
    ============================================================ */
 
 .wa-backdrop{
@@ -22,6 +25,9 @@
   overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr;
+
+  /* Helvetica */
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 .wa-head{
@@ -61,9 +67,10 @@
 
 .wa-scroll{ padding: 14px 14px 8px 14px; overflow: auto; }
 
+/* Fecha centrada */
 .wa-date{
-  display: inline-flex;
-  margin: 10px auto;
+  display: table;                /* clave: se comporta como bloque y se centra */
+  margin: 10px auto;             /* centrado real */
   padding: 6px 10px;
   border-radius: 999px;
   background: rgba(255,255,255,.75);
@@ -90,11 +97,21 @@
 .wa-bubble.other{ background: #fff; border-top-left-radius: 6px; }
 .wa-bubble.admin{ outline: 2px solid rgba(37,211,102,.25); }
 
-.wa-meta{ display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-.wa-from{ font-weight: 900; color: rgba(17,27,33,.85); }
-.wa-time{ margin-left: auto; font-size: 12px; color: rgba(17,27,33,.55); font-weight: 800; }
+/* Encabezado: nombre (izq) + delete (der) */
+.wa-meta{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.wa-from{
+  font-weight: 900;
+  color: rgba(17,27,33,.85);
+}
 
 .wa-del{
+  margin-left: auto;             /* lo empuja a la derecha */
   border: 0 !important;
   background: transparent !important;
   color: rgba(17,27,33,.45) !important;
@@ -105,7 +122,25 @@
 }
 .wa-del:hover{ background: rgba(0,0,0,.06) !important; color: rgba(17,27,33,.75) !important; }
 
-.wa-text{ white-space: pre-wrap; line-height: 1.25; font-weight: 700; color: rgba(17,27,33,.92); }
+.wa-text{
+  white-space: pre-wrap;
+  line-height: 1.25;
+  font-weight: 700;
+  color: rgba(17,27,33,.92);
+}
+
+/* Hora abajo a la derecha (WhatsApp-like) */
+.wa-bubble-foot{
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.wa-time{
+  font-size: 12px;
+  color: rgba(17,27,33,.55);
+  font-weight: 800;
+}
 
 .wa-inputbar{
   padding: 10px;
@@ -126,6 +161,7 @@
   outline: none;
   font-weight: 700;
   background: #fff;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 .wa-send{
@@ -137,6 +173,7 @@
   color: #fff !important;
   font-weight: 900;
   letter-spacing: .2px;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 .wa-send:hover{ background: var(--wa-green-hover) !important; }
 .wa-send:active{ background: var(--wa-green-pressed) !important; transform: translateY(1px); }

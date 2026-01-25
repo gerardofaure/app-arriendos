@@ -202,16 +202,18 @@ export default function MessagesModal({
                 const who = mine ? "" : displayName(fromLower);
                 const curDate = fmtTime(m.ts).slice(0, 10);
                 const prevDate = idx > 0 ? fmtTime(messages[idx - 1].ts).slice(0, 10) : null;
+                const clock = fmtTime(m.ts).slice(11); // hh:mm
 
                 return (
                   <React.Fragment key={m.id}>
+                    {/* Fecha centrada */}
                     {curDate !== prevDate && <div className="wa-date">{curDate}</div>}
 
                     <div className={`wa-row ${mine ? "mine" : "other"}`}>
                       <div className={`wa-bubble ${mine ? "mine" : "other"} ${m.fromRole === "ADMIN" ? "admin" : ""}`}>
+                        {/* Encabezado: nombre (solo otros) + delete (si puede) */}
                         <div className="wa-meta">
                           {!mine && <span className="wa-from">{who}</span>}
-                          <span className="wa-time">{fmtTime(m.ts).slice(11)}</span>
 
                           {canDelete(m) && (
                             <button className="wa-del" title="Eliminar" onClick={() => requestDeleteMessage(m)}>
@@ -221,6 +223,11 @@ export default function MessagesModal({
                         </div>
 
                         <div className="wa-text">{m.text}</div>
+
+                        {/* Hora abajo a la derecha, estilo WhatsApp */}
+                        <div className="wa-bubble-foot">
+                          <span className="wa-time">{clock}</span>
+                        </div>
                       </div>
                     </div>
                   </React.Fragment>

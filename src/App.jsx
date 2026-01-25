@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
-  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -10,15 +9,18 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { db } from "./firebase.js";
+
 import "./styles/App.css";
+
+import Login from "./components/Login.jsx";
 import OwnerGroup from "./components/OwnerGroup.jsx";
 import PropertyHistoryModal from "./components/PropertyHistoryModal.jsx";
 import MessagesModal from "./components/MessagesModal.jsx";
 import ReajustesModal from "./components/ReajustesModal.jsx";
-import MissingContractsModal from "./components/MissingContractsModal.jsx";
 import AdminPassModal from "./components/AdminPassModal.jsx";
 import ConfirmPasswordModal from "./components/ConfirmPasswordModal.jsx";
-import Login from "./components/Login.jsx";
+import MissingContractsModal from "./components/MissingContractsModal.jsx";
+import ValorUFModal from "./components/ValorUFModal.jsx";
 import { getLast12MonthIds } from "./utils/months.js";
 
 /* =========================
@@ -62,6 +64,7 @@ function monthIdFromDate(d) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
+
 function labelFromMonthId(id) {
   const [y, m] = String(id || "").split("-");
   const yy = Number(y || 2000);
@@ -72,12 +75,6 @@ function labelFromMonthId(id) {
   return `${cap} ${yy}`;
 }
 
-function monthNameFromMonthId(id) {
-  const [, m] = String(id || "").split("-");
-  const mm = Number(m || 1);
-  const date = new Date(2000, mm - 1, 1);
-  return date.toLocaleDateString("es-CL", { month: "long" }).replace(/^\w/, (c) => c.toUpperCase());
-}
 function prevMonthId(monthId) {
   const [y, m] = String(monthId || "").split("-");
   const yy = Number(y || 2000);
@@ -92,66 +89,88 @@ function prevMonthId(monthId) {
 export default function App() {
   const today = new Date();
 
-  // Login simple (según tu app)
+  /* -------------------------
+     Login simple
+  ------------------------- */
   const [role, setRole] = useState(null); // "admin" | "viewer" | null
   const [username, setUsername] = useState("");
 
-  // Vista
+  /* -------------------------
+     Vista
+  ------------------------- */
   const [viewMode, setViewMode] = useState("MONTH"); // "MONTH" | "YEAR"
-
-  // Mes
   const [selectedMonthId, setSelectedMonthId] = useState(monthIdFromDate(today));
+  const [selectedYear, setSelectedYear] = useState(today.getFullYear());
 
-  // Selector de mes en cascada: primero año, luego mes
+  // Derivar año desde el mes seleccionado (sin selector de año)
+  useEffect(() => {
+    const y = Number(String(selectedMonthId || "").split("-")[0] || today.getFullYear());
+    if (!Number.isNaN(y)) setSelectedYear(y);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMonthId]);
 
   const prevMonthIdValue = useMemo(() => prevMonthId(selectedMonthId), [selectedMonthId]);
 
-  // Año
-  const [selectedYear, setSelectedYear] = useState(today.getFullYear());
+  // Selector SIEMPRE parte en el mes actual y muestra 12 meses hacia atrás
+  const monthOptions = useMemo(() => {
+    const ids = getLast12MonthIds(monthIdFromDate(today));
+    return ids.map((id) => ({ id, label: labelFromMonthId(id) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // El año se deriva del mes seleccionado (así eliminamos el selector de año en la cabecera)
-  useEffect(() => {
-    const y = Number(String(selectedMonthId || "").split("-")[0] || new Date().getFullYear());
-    if (!Number.isNaN(y)) setSelectedYear(y);
-  }, [selectedMonthId]);
-
-  // Datos
+  /* -------------------------
+     Datos
+  ------------------------- */
   const [owners, setOwners] = useState([]);
   const [ownerFilter, setOwnerFilter] = useState("ALL");
 
   const [dataCurrent, setDataCurrent] = useState({});
   const [dataPrev, setDataPrev] = useState({});
   const [dataAnnual, setDataAnnual] = useState({});
-
   const [loading, setLoading] = useState(false);
 
-  // Edición
+  /* -------------------------
+     Edición
+  ------------------------- */
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Opciones dropdown
+  /* -------------------------
+     Dropdown opciones
+  ------------------------- */
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsRef = useRef(null);
 
-  // Mensajes
+  /* -------------------------
+     Mensajes
+  ------------------------- */
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [messagesUnread, setMessagesUnread] = useState(false);
 
-  // Modales
+  /* -------------------------
+     Modales
+  ------------------------- */
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyOwner, setHistoryOwner] = useState("");
   const [historyProperty, setHistoryProperty] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyData, setHistoryData] = useState([]);
   const [historyContract, setHistoryContract] = useState(null);
-  const [showReajustesModal, setShowReajustesModal] = useState(false);
-  const [showMissingContractsModal, setShowMissingContractsModal] = useState(false);
-  const [showAdminPass, setShowAdminPass] = useState(false);
 
-  // Contratos (cache) para Reajustes del mes
-  const [contractsMap, setContractsMap] = useState({}); // { canonicalId: contractData }
+  const [showReajustesModal, setShowReajustesModal] = useState(false);
+  const [showAdminPass, setShowAdminPass] = useState(false);
+  const [showMissingContracts, setShowMissingContracts] = useState(false);
+  const [showUfModal, setShowUfModal] = useState(false);
+
+  /* -------------------------
+     Contratos (cache)
+  ------------------------- */
+  const [contractsMap, setContractsMap] = useState({});
   const [contractsBusy, setContractsBusy] = useState(false);
 
-  // Confirmación de contraseña (reutilizable)
+  /* -------------------------
+     Confirmación de contraseña
+  ------------------------- */
   const [confirmPassOpen, setConfirmPassOpen] = useState(false);
   const [confirmPassConfig, setConfirmPassConfig] = useState({
     title: "Confirmar contraseña",
@@ -160,25 +179,16 @@ export default function App() {
   });
   const pendingActionRef = useRef(null);
 
-  // Toast
+  /* -------------------------
+     Toast
+  ------------------------- */
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
-
-  // Refs para dropdowns
-  const optionsRef = useRef(null);
 
   const appTitle = "INFORME MENSUAL DE ARRIENDOS";
 
-  // Selector de mes: SIEMPRE parte desde el mes actual y muestra 12 meses hacia atrás
-  const monthOptions = useMemo(() => {
-    const base = monthIdFromDate(new Date());
-    const ids = getLast12MonthIds(base);
-    return ids.map((id) => ({ id, label: labelFromMonthId(id) }));
-  }, []);
   /* =========================
-       Sesión (localStorage)
-       - Solo persiste username + role.
-       - La validación de contraseña ocurre en Login.
-    ========================= */
+     Sesión (localStorage)
+  ========================= */
   useEffect(() => {
     try {
       const raw = localStorage.getItem("app_arriendos_session");
@@ -206,8 +216,8 @@ export default function App() {
   }, [role, username]);
 
   /* =========================
-       Utils UI
-    ========================= */
+     Utils UI
+  ========================= */
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
     setTimeout(() => setToast((t) => ({ ...t, show: false })), 2200);
@@ -220,8 +230,8 @@ export default function App() {
   };
 
   /* =========================
-       Click-outside: dropdowns
-    ========================= */
+     Click-outside: dropdowns
+  ========================= */
   useEffect(() => {
     const onDown = (e) => {
       if (optionsOpen && optionsRef.current && !optionsRef.current.contains(e.target)) setOptionsOpen(false);
@@ -231,8 +241,8 @@ export default function App() {
   }, [optionsOpen]);
 
   /* =========================
-       Cargar estructura: "structure"
-    ========================= */
+     Cargar estructura: "structure/owners"
+  ========================= */
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "structure", "owners"), (snap) => {
       const d = snap.exists() ? snap.data() || {} : {};
@@ -243,8 +253,8 @@ export default function App() {
   }, []);
 
   /* =========================
-       Lectura MES: rents/<YYYY-MM>
-    ========================= */
+     Lectura MES: rents/<YYYY-MM>
+  ========================= */
   useEffect(() => {
     if (viewMode !== "MONTH") return;
 
@@ -279,8 +289,8 @@ export default function App() {
   }, [viewMode, selectedMonthId, prevMonthIdValue]);
 
   /* =========================
-       Lectura AÑO: suma rents del año
-    ========================= */
+     Lectura AÑO: suma rents del año
+  ========================= */
   useEffect(() => {
     if (viewMode !== "YEAR") return;
 
@@ -321,8 +331,8 @@ export default function App() {
   }, [viewMode, selectedYear]);
 
   /* =========================
-       Historial + contrato (PropertyHistoryModal)
-    ========================= */
+     Historial + contrato (PropertyHistoryModal)
+  ========================= */
   useEffect(() => {
     if (!historyOpen) return;
     if (!historyOwner || !historyProperty) return;
@@ -330,17 +340,14 @@ export default function App() {
     (async () => {
       setHistoryLoading(true);
       try {
-        // 1) Contrato
         const cid = canonicalContractId(historyOwner, historyProperty);
         const cSnap = await getDoc(doc(db, "contracts", cid));
         setHistoryContract(cSnap.exists() ? cSnap.data() || null : null);
 
-        // 2) Últimos 12 meses (desde el mes actual; no depende del selector)
-        const last12Desc = getLast12MonthIds(monthIdFromDate(new Date())); // [hoy, -1, -2...]
-        const top12 = last12Desc.slice().reverse(); // asc para el gráfico
+        const ids = getLast12MonthIds(monthIdFromDate(today)).slice().reverse();
 
         const docs = await Promise.all(
-          top12.map(async (id) => {
+          ids.map(async (id) => {
             const s = await getDoc(doc(db, "rents", id));
             return { id, data: s.exists() ? s.data() || {} : {} };
           })
@@ -367,14 +374,14 @@ export default function App() {
         setHistoryLoading(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historyOpen, historyOwner, historyProperty]);
 
   /* =========================
-       Cargar contratos (al abrir modales que lo requieren)
-    ========================= */
+     Cargar contratos (al abrir Reajustes o Contratos faltantes)
+  ========================= */
   useEffect(() => {
-    const need = showReajustesModal || showMissingContractsModal;
-    if (!need) return;
+    if (!showReajustesModal && !showMissingContracts) return;
     if (contractsBusy) return;
 
     (async () => {
@@ -394,11 +401,16 @@ export default function App() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showReajustesModal, showMissingContractsModal]);
+  }, [showReajustesModal, showMissingContracts]);
+
+  const resolveContract = (owner, property) => {
+    const id = canonicalContractId(owner, property);
+    return contractsMap?.[id] || null;
+  };
 
   /* =========================
-       Totales
-    ========================= */
+     Totales
+  ========================= */
   const totalGeneralMonth = useMemo(() => {
     let sum = 0;
     (owners || []).forEach((o) => {
@@ -430,110 +442,102 @@ export default function App() {
   }, [owners, dataAnnual]);
 
   /* =========================
-       Acciones opciones (tu lógica original)
-    ========================= */
+     Acciones
+  ========================= */
+  const handleLogout = () => {
+    setRole(null);
+    setUsername("");
+    setEditing(false);
+    setOptionsOpen(false);
+    showToast("Sesión cerrada", "info");
+  };
+
   const showTotals = () => showToast("Totales listos", "info");
-  const showMissing = () => setShowMissingContractsModal(true);
+
+  const showMissing = () => {
+    setShowMissingContracts(true);
+  };
 
   /* =========================
-       Render
-    ========================= */
-
-  // Login centrado al iniciar
-  if (!role || !username) {
+     Render
+  ========================= */
+  if (!role) {
     return (
       <Login
-        onLogin={({ role: nextRole, username: nextUser }) => {
-          setRole(nextRole);
-          setUsername(nextUser);
+        onLogin={({ role: r, username: u }) => {
+          setRole(r);
+          setUsername(u);
         }}
       />
     );
   }
 
+  const totalKpiValue = viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear;
+
   return (
     <div className="app-shell">
       <div className="app-card">
-        {/* =========================
-            HEADER NUEVO (como pediste)
-        ========================= */}
         <header className="app-header">
-          <div className="header-grid">
-            {/* LEFT */}
-            <div className="header-left">
-              <div className="header-top">
-                <div className="app-title">{appTitle}</div>
-
-                <button
-                  className="btn btn-logout"
-                  onClick={() => {
-                    setRole(null);
-                    setUsername("");
-                    setEditing(false);
-                    setOwnerFilter("ALL");
-                    setMessagesOpen(false);
-                    setOptionsOpen(false);
-                  }}
-                  title="Cerrar sesión"
-                >
-                  Salir
-                </button>
-              </div>
-
-              <div className="header-left-controls">
-                {/* Selector de Mes (últimos 12 meses desde el mes seleccionado) */}
-                <select
-                  className="header-select"
-                  value={selectedMonthId}
-                  onChange={(e) => setSelectedMonthId(e.target.value)}
-                >
-                  {monthOptions.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-
-                {/* Selector Empresa */}
-                <select
-                  className="header-select"
-                  value={ownerFilter}
-                  onChange={(e) => setOwnerFilter(e.target.value)}
-                >
-                  <option value="ALL">Todos</option>
-                  {(owners || []).map((o) => (
-                    <option key={o.name} value={o.name}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          <div className="header-row">
+            {/* Left: título */}
+            <div className="header-title">
+              <div className="app-title">{appTitle}</div>
             </div>
 
-            {/* RIGHT */}
-            <div className="header-right">
+            {/* Center: filtros */}
+            <div className="header-filters">
+              <select
+                className="control-select"
+                value={selectedMonthId}
+                onChange={(e) => {
+                  setViewMode("MONTH");
+                  setSelectedMonthId(e.target.value);
+                }}
+                title="Mes"
+              >
+                {monthOptions.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                className="control-select"
+                value={ownerFilter}
+                onChange={(e) => setOwnerFilter(e.target.value)}
+                title="Empresa"
+              >
+                <option value="ALL">Todas las empresas</option>
+                {(owners || []).map((o) => (
+                  <option key={o.name} value={o.name}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Right: acciones */}
+            <div className="header-actions">
               <button
-                className={messagesUnread ? "btn with-dot header-action" : "btn header-action"}
+                className={`btn btn-secondary ${messagesUnread ? "with-dot" : ""}`}
                 onClick={() => setMessagesOpen(true)}
               >
                 Mensajes
               </button>
 
-              <button
-                className="btn header-action"
-                onClick={() => {
-                  if (role !== "admin") {
-                    showToast("Solo lectura", "error");
-                    return;
-                  }
-                  setEditing((e) => !e);
-                }}
-              >
-                {editing ? "Salir edición" : "Entrar edición"}
-              </button>
+              {role === "admin" && viewMode === "MONTH" && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setEditing((e) => !e)}
+                  title="Editar montos del mes"
+                >
+                  {editing ? "Salir edición" : "Entrar edición"}
+                </button>
+              )}
 
-              <div className="hc-block header-action" ref={optionsRef}>
-                <button className="hc-button" onClick={() => setOptionsOpen((s) => !s)}>
+              <div className="hc-block" ref={optionsRef}>
+                <button className="hc-button" onClick={() => setOptionsOpen((o) => !o)}>
                   Opciones <span className="hc-caret">▾</span>
                 </button>
 
@@ -550,7 +554,6 @@ export default function App() {
                     >
                       Mes
                     </button>
-
                     <button
                       className="hc-item"
                       onClick={() => {
@@ -615,6 +618,17 @@ export default function App() {
                       Contratos faltantes
                     </button>
 
+                    {/* ✅ Valor UF (API) */}
+                    <button
+                      className="hc-item"
+                      onClick={() => {
+                        setShowUfModal(true);
+                        setOptionsOpen(false);
+                      }}
+                    >
+                      Valor UF
+                    </button>
+
                     {viewMode === "MONTH" && (
                       <>
                         <div className="hc-sep" />
@@ -630,27 +644,47 @@ export default function App() {
                       </>
                     )}
 
-                    {role === "admin" && (
-                      <>
-                        <div className="hc-sep" />
-                        <button
-                          className="hc-item"
-                          onClick={() => {
-                            setShowAdminPass(true);
-                            setOptionsOpen(false);
-                          }}
-                        >
-                          Adm pass
-                        </button>
-                      </>
-                    )}
+                    {/* ✅ Adm Pass (siempre visible; solo admin puede entrar) */}
+                    <div className="hc-sep" />
+                    <button
+                      className="hc-item"
+                      onClick={() => {
+                        if (role !== "admin") {
+                          showToast("Solo administradores", "error");
+                          setOptionsOpen(false);
+                          return;
+                        }
+                        setShowAdminPass(true);
+                        setOptionsOpen(false);
+                      }}
+                    >
+                      Adm pass
+                    </button>
+
+                    <div className="hc-sep" />
+                    <button
+                      className="hc-item"
+                      onClick={() => {
+                        handleLogout();
+                      }}
+                    >
+                      Cerrar sesión
+                    </button>
                   </div>
                 )}
               </div>
 
-              <button className="btn btn-secondary header-action">
-                Total general: {moneyCLP0(viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear)}
+              <button className="btn btn-danger" onClick={handleLogout} title="Salir">
+                Salir
               </button>
+            </div>
+          </div>
+
+          {/* KPI Total general */}
+          <div className="kpi-strip">
+            <div className="kpi-card">
+              <div className="kpi-label">Total general</div>
+              <div className="kpi-value">{moneyCLP0(totalKpiValue)}</div>
             </div>
           </div>
         </header>
@@ -714,30 +748,34 @@ export default function App() {
 
           {!loading && viewMode === "YEAR" && (
             <div className="annual-wrap">
-              <div className="annual-title">Totales año {selectedYear}</div>
-
+              <div className="annual-title">Resumen anual {selectedYear}</div>
               <div className="annual-table">
                 <div className="annual-row annual-head">
                   <div>Empresa</div>
                   <div>Propiedad</div>
-                  <div>Total</div>
+                  <div style={{ textAlign: "right" }}>Total</div>
                 </div>
 
-                {Object.keys(dataAnnual || {})
-                  .sort()
-                  .flatMap((ownerName) => {
-                    const block = dataAnnual[ownerName] || {};
-                    return Object.keys(block)
-                      .filter((k) => !String(k).endsWith("__obs") && !String(k).endsWith("__ontime"))
-                      .sort()
-                      .map((propName) => (
-                        <div key={`${ownerName}-${propName}`} className="annual-row">
-                          <div>{ownerName}</div>
-                          <div>{propName}</div>
-                          <div style={{ textAlign: "right", fontWeight: 900 }}>{moneyCLP0(block[propName])}</div>
-                        </div>
-                      ));
-                  })}
+                {(owners || [])
+                  .filter((o) => ownerFilter === "ALL" || o.name === ownerFilter)
+                  .flatMap((o) =>
+                    (o.properties || []).map((p) => {
+                      const ok = pickKeyCI(dataAnnual, o.name);
+                      const block = ok ? dataAnnual[ok] : {};
+                      const pk = pickKeyCI(block, p);
+                      const value = pk ? Number(block[pk] || 0) : 0;
+                      return { owner: o.name, prop: p, value };
+                    })
+                  )
+                  .map((r, idx) => (
+                    <div key={`${r.owner}-${r.prop}-${idx}`} className="annual-row">
+                      <div>{r.owner}</div>
+                      <div>{r.prop}</div>
+                      <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
+                        {moneyCLP0(r.value)}
+                      </div>
+                    </div>
+                  ))}
               </div>
             </div>
           )}
@@ -747,87 +785,79 @@ export default function App() {
         {toast.show && <div className={`toast ${toast.type}`}>{toast.message}</div>}
 
         {/* Modales */}
-        {historyOpen && (
-          <PropertyHistoryModal
-            open={historyOpen}
-            onClose={() => setHistoryOpen(false)}
-            loading={historyLoading}
-            ownerName={historyOwner}
-            propertyName={historyProperty}
-            history={historyData}
-            contract={historyContract}
-            role={role}
-          />
-        )}
+        <MessagesModal
+          open={messagesOpen}
+          onClose={() => setMessagesOpen(false)}
+          username={username}
+          onUnreadChange={(hasUnread) => setMessagesUnread(!!hasUnread)}
+        />
 
-        {messagesOpen && (
-          <MessagesModal
-            open={messagesOpen}
-            onClose={() => setMessagesOpen(false)}
-            username={username}
-            role={role}
-            onUnread={(hasUnread) => setMessagesUnread(!!hasUnread)}
-          />
-        )}
+        <PropertyHistoryModal
+          open={historyOpen}
+          onClose={() => setHistoryOpen(false)}
+          ownerName={historyOwner}
+          propertyName={historyProperty}
+          loading={historyLoading}
+          series={historyData}
+          contract={historyContract}
+        />
 
-        {showReajustesModal && (
-          <ReajustesModal
-            open={showReajustesModal}
-            onClose={() => setShowReajustesModal(false)}
-            monthNumber={Number(String(selectedMonthId || "").split("-")[1] || 1)}
-            owners={owners}
-            resolveContract={(ownerName, propertyName) => {
-              const id = canonicalContractId(ownerName, propertyName);
-              return contractsMap?.[id] || null;
-            }}
-            onGo={(ownerName, propertyName) => {
-              setShowReajustesModal(false);
-              setHistoryOwner(ownerName);
-              setHistoryProperty(propertyName);
-              setHistoryOpen(true);
-            }}
-          />
-        )}
+        <ReajustesModal
+          open={showReajustesModal}
+          onClose={() => setShowReajustesModal(false)}
+          monthNumber={Number(String(selectedMonthId).split("-")[1] || 1)}
+          owners={owners}
+          resolveContract={(o, p) => {
+            const id = canonicalContractId(o, p);
+            return contractsMap?.[id] || null;
+          }}
+          onGo={(oName, pName) => {
+            setShowReajustesModal(false);
+            setHistoryOwner(oName);
+            setHistoryProperty(pName);
+            setHistoryOpen(true);
+          }}
+        />
 
-        {showMissingContractsModal && (
-          <MissingContractsModal
-            open={showMissingContractsModal}
-            onClose={() => setShowMissingContractsModal(false)}
-            owners={owners}
-            resolveContract={(ownerName, propertyName) => {
-              const id = canonicalContractId(ownerName, propertyName);
-              return contractsMap?.[id] || null;
-            }}
-            onGo={(ownerName, propertyName) => {
-              setShowMissingContractsModal(false);
-              setHistoryOwner(ownerName);
-              setHistoryProperty(propertyName);
-              setHistoryOpen(true);
-            }}
-          />
-        )}
+        <MissingContractsModal
+          open={showMissingContracts}
+          onClose={() => setShowMissingContracts(false)}
+          owners={owners}
+          resolveContract={(o, p) => {
+            const id = canonicalContractId(o, p);
+            return contractsMap?.[id] || null;
+          }}
+          onGo={(oName, pName) => {
+            setShowMissingContracts(false);
+            setHistoryOwner(oName);
+            setHistoryProperty(pName);
+            setHistoryOpen(true);
+          }}
+        />
 
-        {showAdminPass && <AdminPassModal open={showAdminPass} onClose={() => setShowAdminPass(false)} />}
+        {/* ✅ Modal UF */}
+        <ValorUFModal open={showUfModal} onClose={() => setShowUfModal(false)} />
 
-        {confirmPassOpen && (
-          <ConfirmPasswordModal
-            open={confirmPassOpen}
-            onClose={() => setConfirmPassOpen(false)}
-            title={confirmPassConfig.title}
-            message={confirmPassConfig.message}
-            confirmLabel={confirmPassConfig.confirmLabel}
-            username={username}
-            onConfirm={async () => {
-              try {
-                if (typeof pendingActionRef.current === "function") {
-                  await pendingActionRef.current();
-                }
-              } finally {
-                pendingActionRef.current = null;
-              }
-            }}
-          />
-        )}
+        <AdminPassModal open={showAdminPass} onClose={() => setShowAdminPass(false)} />
+
+        <ConfirmPasswordModal
+          open={confirmPassOpen}
+          username={username}
+          title={confirmPassConfig.title}
+          message={confirmPassConfig.message}
+          confirmLabel={confirmPassConfig.confirmLabel}
+          onClose={() => setConfirmPassOpen(false)}
+          onConfirm={async () => {
+            try {
+              const fn = pendingActionRef.current;
+              pendingActionRef.current = null;
+              if (typeof fn === "function") await fn();
+            } catch (e) {
+              console.error(e);
+              showToast("Acción cancelada", "error");
+            }
+          }}
+        />
       </div>
     </div>
   );

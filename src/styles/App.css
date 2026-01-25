@@ -1,19 +1,21 @@
 /* ============================================================
-   App principal (layout + header + dropdowns + toast)
+   App principal (Theme B: Corporate Blue)
+   Layout + header + dropdowns + toast
    ============================================================ */
 
 .app-shell{
   min-height: 100vh;
   display: flex;
   justify-content: center;
-  padding: 18px;
+  padding: 22px;
+  background: var(--bg);
 }
 
 .app-card{
-  width: 66.666vw; /* 2/3 en desktop */
-  background: var(--surface);
+  width: min(1240px, 100%);
+  background: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--r-xl);
+  border-radius: 20px;
   box-shadow: var(--shadow);
   overflow: hidden;
 }
@@ -21,89 +23,139 @@
 .app-header{
   background: linear-gradient(180deg, #FFFFFF 0%, var(--surface-2) 100%);
   border-bottom: 1px solid var(--border);
-  padding: 16px;
+  padding: 16px 18px;
 }
 
-.header-grid{
+/* --- Header structure --- */
+.header-row{
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 18px;
-  align-items: start;
+  grid-template-columns: 1.2fr 1.6fr 1.2fr;
+  align-items: center;
+  gap: 14px;
 }
 
-.header-left{ display: grid; gap: 10px; justify-items: start; }
-
-.header-top{
-  width: 100%;
+.header-title{
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.app-title{ font-weight: 900; letter-spacing: .2px; font-size: 16px; }
-
-.btn-logout{ padding: 9px 14px; }
-
-.header-left-controls{ display: grid; gap: 10px; width: min(520px, 100%); }
-
-/* Selector de mes en cascada (Año + Mes) */
-.month-cascade{
-  display: grid;
-  grid-template-columns: 140px 1fr;
   gap: 10px;
-  align-items: center;
+  min-width: 0;
 }
 
-.month-cascade .header-select{ width: 100%; min-width: 0; }
+.app-title{
+  font-weight: 700;
+  letter-spacing: .2px;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-.header-select{ width: min(420px, 100%); }
-
-.header-right{
+.header-filters{
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  justify-content: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
-.header-action{ justify-self: end; }
+.control-select{
+  appearance: none;
+  width: auto;
+  min-width: 220px;
+  max-width: 340px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  box-shadow: 0 1px 0 rgba(15,23,42,.03);
+  cursor: pointer;
+}
 
-.app-body{ padding: 16px; }
+.control-select:focus{
+  outline: none;
+  border-color: rgba(29,78,216,.50);
+  box-shadow: 0 0 0 4px var(--ring);
+}
+
+.header-actions{
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.header-actions .btn,
+.header-actions .hc-button{
+  height: 38px;
+}
+
+/* KPI strip */
+.kpi-strip{
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.kpi-card{
+  min-width: 260px;
+  border-radius: 16px;
+  padding: 12px 14px;
+  color: #fff;
+  background: linear-gradient(135deg, #2F80ED 0%, #1B5FD6 100%);
+  box-shadow: 0 10px 22px rgba(15,23,42,.14);
+}
+
+.kpi-label{
+  font-size: 12px;
+  font-weight: 600;
+  opacity: .92;
+  letter-spacing: .2px;
+}
+
+.kpi-value{
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-body{ padding: 16px 18px 18px 18px; }
 
 /* Indicador de no-leídos */
 .with-dot{ position: relative; }
 .with-dot::after{
   content: "";
   position: absolute;
-  top: 6px;
-  right: 8px;
-  width: 10px;
-  height: 10px;
+  top: 7px;
+  right: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: #ef4444;
   box-shadow: 0 0 0 3px #fff;
 }
 
-/* ---------- Dropdown genérico (Opciones / Mes) ---------- */
+/* ---------- Dropdown genérico (Opciones) ---------- */
 .hc-block{ position: relative; display: inline-flex; }
 
 .hc-button{
   appearance: none;
-  border: 0;
   cursor: pointer;
-
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
   border-radius: 999px;
-  background: var(--wa-green);
+  background: var(--primary);
   color: #fff;
-  font-weight: 800;
+  font-weight: 700;
+  border: 1px solid transparent;
 }
 
-.hc-button:hover{ background: var(--wa-green-hover); }
-.hc-button:active{ background: var(--wa-green-pressed); transform: translateY(1px); }
+.hc-button:hover{ background: var(--primaryHover); }
+.hc-button:active{ background: #163AA8; transform: translateY(1px); }
 
 .hc-caret{ opacity: .9; }
 
@@ -112,10 +164,10 @@
   right: 0;
   top: calc(100% + 10px);
   z-index: 50;
-  min-width: 240px;
-  background: var(--surface);
+  min-width: 250px;
+  background: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  border-radius: 16px;
   box-shadow: var(--shadow);
   padding: 8px;
 }
@@ -124,7 +176,7 @@
   padding: 8px 10px 6px 10px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: .2px;
 }
 
@@ -137,12 +189,12 @@
   color: var(--text);
   border-radius: 12px;
   padding: 10px 12px;
-  font-weight: 800;
+  font-weight: 600;
   border: 0;
   cursor: pointer;
 }
 
-.hc-item:hover{ background: rgba(37,211,102,.10); }
+.hc-item:hover{ background: rgba(29,78,216,.08); }
 
 .hc-sep{ height: 1px; background: var(--border); margin: 8px 6px; }
 
@@ -150,10 +202,10 @@
 .loading{
   padding: 10px 12px;
   border: 1px dashed var(--border);
-  border-radius: var(--r-md);
+  border-radius: 12px;
   color: var(--muted);
-  font-weight: 800;
-  background: rgba(102,119,129,.04);
+  font-weight: 600;
+  background: rgba(100,116,139,.05);
 }
 
 .toast{
@@ -164,24 +216,24 @@
   padding: 12px 14px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--card);
   box-shadow: var(--shadow);
-  font-weight: 900;
+  font-weight: 700;
   z-index: 80;
 }
 
-.toast.success{ border-color: rgba(34,197,94,.35); }
-.toast.error{ border-color: rgba(220,38,38,.35); }
-.toast.info{ border-color: rgba(59,130,246,.35); }
+.toast.success{ border-color: rgba(22,101,52,.25); }
+.toast.error{ border-color: rgba(153,27,27,.25); }
+.toast.info{ border-color: rgba(29,78,216,.25); }
 
 /* ---------- Annual ---------- */
 .annual-wrap{ display: grid; gap: 12px; }
-.annual-title{ font-weight: 900; }
+.annual-title{ font-weight: 700; }
 .annual-table{
   border: 1px solid var(--border);
-  border-radius: var(--r-xl);
+  border-radius: 20px;
   overflow: hidden;
-  background: var(--surface);
+  background: var(--card);
 }
 
 .annual-row{
@@ -189,14 +241,15 @@
   grid-template-columns: 1.2fr 1.4fr 0.8fr;
   gap: 10px;
   padding: 10px 12px;
-  border-top: 1px solid rgba(0,0,0,.06);
+  border-top: 1px solid rgba(15,23,42,.06);
   align-items: center;
+  font-size: 13px;
 }
 .annual-row:first-child{ border-top: 0; }
 
 .annual-head{
   background: var(--surface-2);
-  font-weight: 900;
+  font-weight: 700;
   color: var(--muted);
   font-size: 12px;
   letter-spacing: .2px;
@@ -207,20 +260,16 @@
 
 /* ---------- Responsive base ---------- */
 @media (max-width: 1024px){
-  .app-card{ width: 100%; }
-  .header-grid{ grid-template-columns: 1fr; }
-  .header-right{ align-items: stretch; }
-  .header-right .btn, .header-right .hc-button{ width: 100%; }
+  .header-row{ grid-template-columns: 1fr; justify-items: stretch; }
+  .header-filters{ justify-content: flex-start; }
+  .header-actions{ justify-content: flex-start; }
+  .control-select{ width: 100%; max-width: none; }
+  .kpi-strip{ justify-content: flex-start; }
+  .kpi-card{ width: 100%; }
 }
 
 @media (max-width: 520px){
   .app-shell{ padding: 12px; }
   .app-header{ padding: 14px; }
   .app-body{ padding: 14px; }
-  .header-top{ flex-direction: column; align-items: flex-start; }
-  .btn-logout{ width: 100%; }
-
-  .month-cascade{
-    grid-template-columns: 1fr;
-  }
 }

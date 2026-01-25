@@ -35,9 +35,7 @@ export default function MissingContractsModal({ open, onClose, owners = [], reso
         if (!url) missing.push({ property: p, status: "SIN PDF" });
       });
 
-      if (missing.length) {
-        out.push({ owner: o.name, missing });
-      }
+      if (missing.length) out.push({ owner: o.name, missing });
     });
 
     return out;
@@ -97,7 +95,7 @@ export default function MissingContractsModal({ open, onClose, owners = [], reso
         </div>
 
         <div className="modal-footer">
-          <button className="btn" onClick={onClose}>
+          <button className="btn btn-secondary" onClick={onClose}>
             CERRAR
           </button>
         </div>

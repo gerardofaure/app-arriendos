@@ -1,0 +1,108 @@
+/* ============================================================
+   Modal: Valor UF (Theme B Corporate Blue)
+   ============================================================ */
+
+.uf-top{
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.uf-kpi{
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(47,128,237,.10) 0%, rgba(27,95,214,.06) 100%);
+}
+
+.uf-kpi-label{
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: .2px;
+}
+
+.uf-kpi-value{
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.uf-kpi-sub{
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.uf-actions{
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.uf-source{
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.uf-grid{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.uf-card{
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--card);
+}
+
+.uf-card-title{
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: .2px;
+  margin-bottom: 10px;
+}
+
+.uf-field label{
+  margin-bottom: 6px;
+}
+
+.uf-field input{
+  height: 42px;
+  font-weight: 700;
+}
+
+.uf-result{
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15,23,42,.08);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.uf-result-label{
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.uf-result-value{
+  font-size: 16px;
+  font-weight: 900;
+}
+
+@media (max-width: 820px){
+  .uf-top{ flex-direction: column; }
+  .uf-actions{ justify-items: start; }
+  .uf-grid{ grid-template-columns: 1fr; }
+}

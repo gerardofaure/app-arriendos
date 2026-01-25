@@ -1,29 +1,40 @@
 /* ============================================================
    Base / Tokens compartidos
    (se importa UNA sola vez en src/main.jsx)
+   Tema B: Corporate Blue
    ============================================================ */
 
 :root{
-  --wa-green: #25D366;
-  --wa-green-hover: #1DA851;
-  --wa-green-pressed: #128C7E;
+  /* ---- Paleta solicitada ---- */
+  --bg: #F3F6FB;
+  --card: #FFFFFF;
+  --text: #0F172A;
+  --muted: #64748B;
+  --border: #D9E2F2;
+  --primary: #1D4ED8;
+  --primaryHover: #1E40AF;
+  --successBg: #DCFCE7;
+  --successText: #166534;
+  --dangerBg: #FEE2E2;
+  --dangerText: #991B1B;
 
-  --bg: #F4F6F7;
-  --surface: #FFFFFF;
-  --surface-2: #FBFCFD;
+  /* ---- Alias compatibilidad (no romper CSS existente) ---- */
+  --surface: var(--card);
+  --surface-2: #F8FAFF;
 
-  --text: #111B21;
-  --muted: #667781;
+  /* Antes era “WhatsApp green”; lo dejamos como alias del tema */
+  --wa-green: var(--primary);
+  --wa-green-hover: var(--primaryHover);
+  --wa-green-pressed: #163AA8;
 
-  --border: #E6E8EB;
-  --ring: rgba(37, 211, 102, .20);
-  --shadow: 0 10px 28px rgba(0,0,0,.10);
+  --ring: rgba(29,78,216,.18);
+  --shadow: 0 10px 28px rgba(15,23,42,.10);
 
   --r-xl: 20px;
   --r-lg: 16px;
   --r-md: 12px;
 
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font: "Manrope", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
 
 *{ box-sizing: border-box; }
@@ -61,11 +72,11 @@ input, select, textarea{
 }
 
 input:focus, select:focus, textarea:focus{
-  border-color: rgba(37,211,102,.55);
+  border-color: rgba(29,78,216,.65);
   box-shadow: 0 0 0 4px var(--ring);
 }
 
-::placeholder{ color: rgba(102,119,129,.65); }
+::placeholder{ color: rgba(100,116,139,.65); }
 
 /* ---------- Botones (compartidos) ---------- */
 .btn,
@@ -73,16 +84,16 @@ a.btn,
 input[type="button"].btn,
 input[type="submit"].btn{
   appearance: none;
-  border: 0;
   cursor: pointer;
   user-select: none;
 
-  background: var(--wa-green);
+  border: 1px solid transparent;
+  background: var(--primary);
   color: #fff;
 
   border-radius: 999px;
   padding: 10px 14px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: .2px;
 
   display: inline-flex;
@@ -90,28 +101,46 @@ input[type="submit"].btn{
   justify-content: center;
   gap: 10px;
 
-  transition: transform .05s ease, filter .15s ease, background .15s ease;
+  transition: transform .05s ease, filter .15s ease, background .15s ease, border-color .15s ease;
 }
 
-.btn:hover{ background: var(--wa-green-hover); }
-.btn:active{ background: var(--wa-green-pressed); transform: translateY(1px); }
+.btn:hover{ background: var(--primaryHover); }
+.btn:active{ background: #163AA8; transform: translateY(1px); }
 .btn:disabled{ opacity: .55; cursor: not-allowed; }
 
-/* alias para no romper clases existentes */
-.btn-primary{ }
+/* Primario (alias) */
+.btn-primary{ background: var(--primary); color: #fff; border-color: transparent; }
+.btn-primary:hover{ background: var(--primaryHover); }
 
+/* Secundario outline/ghost */
 .btn-secondary{
-  background: rgba(37,211,102,.12);
+  background: transparent;
   color: var(--text);
+  border-color: var(--border);
 }
-.btn-secondary:hover{ background: rgba(37,211,102,.18); }
-.btn-secondary:active{ background: rgba(18,140,126,.22); }
+.btn-secondary:hover{
+  background: rgba(29,78,216,.06);
+  border-color: rgba(29,78,216,.35);
+}
+.btn-secondary:active{ background: rgba(29,78,216,.10); transform: translateY(1px); }
 
-.btn-danger{ background: #ef4444; }
-.btn-danger:hover{ background: #dc2626; }
+/* Ghost (sin borde) */
+.btn-ghost{
+  background: transparent;
+  color: var(--text);
+  border-color: transparent;
+}
+.btn-ghost:hover{ background: rgba(15,23,42,.05); }
 
-.btn-sm{ padding: 8px 10px; border-radius: 999px; font-weight: 900; }
-.btn-xs{ padding: 6px 8px; border-radius: 999px; font-weight: 900; }
+.btn-danger{
+  background: transparent;
+  color: var(--dangerText);
+  border-color: rgba(153,27,27,.25);
+}
+.btn-danger:hover{ background: rgba(153,27,27,.08); border-color: rgba(153,27,27,.35); }
+
+.btn-sm{ padding: 8px 10px; border-radius: 999px; font-weight: 700; }
+.btn-xs{ padding: 6px 8px; border-radius: 999px; font-weight: 700; }
 
 /* Inputs inline (se usa en varias secciones) */
 .inline-input{
@@ -120,5 +149,8 @@ input[type="submit"].btn{
   border-radius: 12px;
   border: 1px solid var(--border);
   background: #fff;
-  font-weight: 800;
+  font-weight: 600;
 }
+
+/* Utilidad números: alineación estable */
+.tabular-nums{ font-variant-numeric: tabular-nums; }

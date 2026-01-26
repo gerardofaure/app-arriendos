@@ -80,14 +80,14 @@ function getStoredHash(u) {
 
 const DEFAULT_CARDS = [
   {
-    icon: "🔒",
-    title: "Mantente atento a estafas",
-    body: "Nunca compartas tu clave. Si alguien te pide datos por teléfono o WhatsApp, desconfía y verifica por canales oficiales.",
+    icon: "🧠",
+    title: "AppChile - Gerardo Faure",
+    body: "Desarrollador Full Stack.",
   },
   {
-    icon: "📣",
-    title: "Comunicados del sistema",
-    body: "Aquí podrás ver avisos importantes sobre arriendos, reajustes del mes y recordatorios para el cierre mensual.",
+    icon: "☢️",
+    title: "Contacto",
+    body: "gerardofaure@gmail.com",
   },
 ];
 

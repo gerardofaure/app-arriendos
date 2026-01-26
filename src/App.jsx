@@ -90,7 +90,7 @@ export default function App() {
   const today = new Date();
 
   /* -------------------------
-     Login simple
+     Login
   ------------------------- */
   const [role, setRole] = useState(null); // "admin" | "viewer" | null
   const [username, setUsername] = useState("");
@@ -102,7 +102,6 @@ export default function App() {
   const [selectedMonthId, setSelectedMonthId] = useState(monthIdFromDate(today));
   const [selectedYear, setSelectedYear] = useState(today.getFullYear());
 
-  // Derivar año desde el mes seleccionado (sin selector de año)
   useEffect(() => {
     const y = Number(String(selectedMonthId || "").split("-")[0] || today.getFullYear());
     if (!Number.isNaN(y)) setSelectedYear(y);
@@ -111,7 +110,7 @@ export default function App() {
 
   const prevMonthIdValue = useMemo(() => prevMonthId(selectedMonthId), [selectedMonthId]);
 
-  // Selector SIEMPRE parte en el mes actual y muestra 12 meses hacia atrás
+  // Selector SIEMPRE desde el mes actual hacia atrás (12)
   const monthOptions = useMemo(() => {
     const ids = getLast12MonthIds(monthIdFromDate(today));
     return ids.map((id) => ({ id, label: labelFromMonthId(id) }));
@@ -216,6 +215,26 @@ export default function App() {
   }, [role, username]);
 
   /* =========================
+     🔥 Listener real-time de NO LEÍDOS
+     (esto es lo que faltaba para que palpite)
+  ========================= */
+  useEffect(() => {
+    if (!role) return;
+
+    const unsub = onSnapshot(
+      doc(db, "meta", "messages"),
+      (snap) => {
+        const d = snap.exists() ? snap.data() || {} : {};
+        const flag = role === "admin" ? !!d.unreadForAdmin : !!d.unreadForViewer;
+        setMessagesUnread(flag);
+      },
+      () => setMessagesUnread(false)
+    );
+
+    return () => unsub();
+  }, [role]);
+
+  /* =========================
      Utils UI
   ========================= */
   const showToast = (message, type = "info") => {
@@ -230,7 +249,7 @@ export default function App() {
   };
 
   /* =========================
-     Click-outside: dropdowns
+     Click-outside dropdown
   ========================= */
   useEffect(() => {
     const onDown = (e) => {
@@ -241,7 +260,7 @@ export default function App() {
   }, [optionsOpen]);
 
   /* =========================
-     Cargar estructura: "structure/owners"
+     Estructura: "structure/owners"
   ========================= */
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "structure", "owners"), (snap) => {
@@ -253,7 +272,7 @@ export default function App() {
   }, []);
 
   /* =========================
-     Lectura MES: rents/<YYYY-MM>
+     MES: rents/<YYYY-MM>
   ========================= */
   useEffect(() => {
     if (viewMode !== "MONTH") return;
@@ -279,17 +298,13 @@ export default function App() {
     );
 
     return () => {
-      try {
-        unsubCurr && unsubCurr();
-      } catch {}
-      try {
-        unsubPrev && unsubPrev();
-      } catch {}
+      try { unsubCurr && unsubCurr(); } catch {}
+      try { unsubPrev && unsubPrev(); } catch {}
     };
   }, [viewMode, selectedMonthId, prevMonthIdValue]);
 
   /* =========================
-     Lectura AÑO: suma rents del año
+     AÑO: suma rents del año
   ========================= */
   useEffect(() => {
     if (viewMode !== "YEAR") return;
@@ -331,7 +346,7 @@ export default function App() {
   }, [viewMode, selectedYear]);
 
   /* =========================
-     Historial + contrato (PropertyHistoryModal)
+     Historial + contrato
   ========================= */
   useEffect(() => {
     if (!historyOpen) return;
@@ -358,11 +373,7 @@ export default function App() {
           const ownerBlock = ownerKey ? data[ownerKey] : {};
           const propKey = pickKeyCI(ownerBlock, historyProperty);
           const value = propKey ? Number(ownerBlock[propKey] || 0) : 0;
-          return {
-            monthId: id,
-            monthLabel: labelFromMonthId(id),
-            value,
-          };
+          return { monthId: id, monthLabel: labelFromMonthId(id), value };
         });
 
         setHistoryData(series);
@@ -378,7 +389,7 @@ export default function App() {
   }, [historyOpen, historyOwner, historyProperty]);
 
   /* =========================
-     Cargar contratos (al abrir Reajustes o Contratos faltantes)
+     Cargar contratos
   ========================= */
   useEffect(() => {
     if (!showReajustesModal && !showMissingContracts) return;
@@ -389,9 +400,7 @@ export default function App() {
       try {
         const snap = await getDocs(collection(db, "contracts"));
         const map = {};
-        snap.forEach((d) => {
-          map[d.id] = d.data() || {};
-        });
+        snap.forEach((d) => (map[d.id] = d.data() || {}));
         setContractsMap(map);
       } catch (e) {
         console.error(e);
@@ -402,11 +411,6 @@ export default function App() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showReajustesModal, showMissingContracts]);
-
-  const resolveContract = (owner, property) => {
-    const id = canonicalContractId(owner, property);
-    return contractsMap?.[id] || null;
-  };
 
   /* =========================
      Totales
@@ -452,24 +456,21 @@ export default function App() {
     showToast("Sesión cerrada", "info");
   };
 
-  const showTotals = () => showToast("Totales listos", "info");
-
-  const showMissing = () => {
-    setShowMissingContracts(true);
+  const handleLogin = (a, b) => {
+    if (a && typeof a === "object") {
+      setRole(a.role || null);
+      setUsername(a.username || "");
+      return;
+    }
+    setRole(a || null);
+    setUsername(b || "");
   };
 
   /* =========================
      Render
   ========================= */
   if (!role) {
-    return (
-      <Login
-        onLogin={({ role: r, username: u }) => {
-          setRole(r);
-          setUsername(u);
-        }}
-      />
-    );
+    return <Login onLogin={handleLogin} />;
   }
 
   const totalKpiValue = viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear;
@@ -479,12 +480,15 @@ export default function App() {
       <div className="app-card">
         <header className="app-header">
           <div className="header-row">
-            {/* Left: título */}
+            {/* Left */}
             <div className="header-title">
-              <div className="app-title">{appTitle}</div>
+              <div className="title-stack">
+                <div className="app-title">{appTitle}</div>
+                <div className="app-user">{username}</div>
+              </div>
             </div>
 
-            {/* Center: filtros */}
+            {/* Center */}
             <div className="header-filters">
               <select
                 className="control-select"
@@ -517,21 +521,17 @@ export default function App() {
               </select>
             </div>
 
-            {/* Right: acciones */}
+            {/* Right */}
             <div className="header-actions">
               <button
-                className={`btn btn-secondary ${messagesUnread ? "with-dot" : ""}`}
+                className={`btn btn-secondary ${messagesUnread ? "with-dot pulse" : ""}`}
                 onClick={() => setMessagesOpen(true)}
               >
                 Mensajes
               </button>
 
               {role === "admin" && viewMode === "MONTH" && (
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setEditing((e) => !e)}
-                  title="Editar montos del mes"
-                >
+                <button className="btn btn-secondary" onClick={() => setEditing((e) => !e)}>
                   {editing ? "Salir edición" : "Entrar edición"}
                 </button>
               )}
@@ -545,22 +545,10 @@ export default function App() {
                   <div className="hc-menu">
                     <div className="hc-label">Vista</div>
 
-                    <button
-                      className="hc-item"
-                      onClick={() => {
-                        setViewMode("MONTH");
-                        setOptionsOpen(false);
-                      }}
-                    >
+                    <button className="hc-item" onClick={() => { setViewMode("MONTH"); setOptionsOpen(false); }}>
                       Mes
                     </button>
-                    <button
-                      className="hc-item"
-                      onClick={() => {
-                        setViewMode("YEAR");
-                        setOptionsOpen(false);
-                      }}
-                    >
+                    <button className="hc-item" onClick={() => { setViewMode("YEAR"); setOptionsOpen(false); }}>
                       Año
                     </button>
 
@@ -598,53 +586,29 @@ export default function App() {
                       </button>
                     )}
 
-                    <button
-                      className="hc-item"
-                      onClick={() => {
-                        showTotals();
-                        setOptionsOpen(false);
-                      }}
-                    >
+                    <button className="hc-item" onClick={() => { showToast("Totales listos", "info"); setOptionsOpen(false); }}>
                       Totales
                     </button>
 
-                    <button
-                      className="hc-item"
-                      onClick={() => {
-                        showMissing();
-                        setOptionsOpen(false);
-                      }}
-                    >
+                    <button className="hc-item" onClick={() => { setShowMissingContracts(true); setOptionsOpen(false); }}>
                       Contratos faltantes
                     </button>
 
-                    {/* ✅ Valor UF (API) */}
-                    <button
-                      className="hc-item"
-                      onClick={() => {
-                        setShowUfModal(true);
-                        setOptionsOpen(false);
-                      }}
-                    >
+                    {/* ✅ UF */}
+                    <button className="hc-item" onClick={() => { setShowUfModal(true); setOptionsOpen(false); }}>
                       Valor UF
                     </button>
 
                     {viewMode === "MONTH" && (
                       <>
                         <div className="hc-sep" />
-                        <button
-                          className="hc-item"
-                          onClick={() => {
-                            setShowReajustesModal(true);
-                            setOptionsOpen(false);
-                          }}
-                        >
+                        <button className="hc-item" onClick={() => { setShowReajustesModal(true); setOptionsOpen(false); }}>
                           Reajustes del mes
                         </button>
                       </>
                     )}
 
-                    {/* ✅ Adm Pass (siempre visible; solo admin puede entrar) */}
+                    {/* ✅ Adm pass */}
                     <div className="hc-sep" />
                     <button
                       className="hc-item"
@@ -661,15 +625,7 @@ export default function App() {
                       Adm pass
                     </button>
 
-                    <div className="hc-sep" />
-                    <button
-                      className="hc-item"
-                      onClick={() => {
-                        handleLogout();
-                      }}
-                    >
-                      Cerrar sesión
-                    </button>
+                    {/* ❌ Sin “Cerrar sesión” aquí */}
                   </div>
                 )}
               </div>
@@ -781,15 +737,15 @@ export default function App() {
           )}
         </main>
 
-        {/* Toast */}
         {toast.show && <div className={`toast ${toast.type}`}>{toast.message}</div>}
 
-        {/* Modales */}
+        {/* ✅ Mensajes: pasamos role + callback correcto */}
         <MessagesModal
           open={messagesOpen}
           onClose={() => setMessagesOpen(false)}
+          role={role}
           username={username}
-          onUnreadChange={(hasUnread) => setMessagesUnread(!!hasUnread)}
+          onUnread={(hasUnread) => setMessagesUnread(!!hasUnread)}
         />
 
         <PropertyHistoryModal
@@ -835,9 +791,7 @@ export default function App() {
           }}
         />
 
-        {/* ✅ Modal UF */}
         <ValorUFModal open={showUfModal} onClose={() => setShowUfModal(false)} />
-
         <AdminPassModal open={showAdminPass} onClose={() => setShowAdminPass(false)} />
 
         <ConfirmPasswordModal

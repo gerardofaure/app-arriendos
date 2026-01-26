@@ -26,7 +26,7 @@ function fmtTime(ts) {
 }
 
 /**
- * Modal estilo WhatsApp (80% pantalla)
+ * Modal estilo WhatsApp
  */
 export default function MessagesModal({
   open,
@@ -34,7 +34,10 @@ export default function MessagesModal({
   username,
   onClose,
   onUnread, // (bool) => void
+  onUnreadChange, // compatibilidad con versiones anteriores
 }) {
+  const setUnread = onUnread || onUnreadChange;
+
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -75,7 +78,7 @@ export default function MessagesModal({
     return () => unsub();
   }, [open]);
 
-  // Cargar usuarios para mostrar Nombre + Apellido en mensajes
+  // Cargar usuarios (Nombre + Apellido)
   useEffect(() => {
     if (!open) return;
     const q = query(collection(db, "users"));
@@ -103,30 +106,42 @@ export default function MessagesModal({
     return () => unsub();
   }, [open]);
 
-  // Al abrir: marcar "leído" para la UI (solo indicador)
+  // ✅ Al abrir: apagar UI + marcar leído en Firestore
   useEffect(() => {
     if (!open) return;
-    onUnread?.(false);
+
+    // Apaga el indicador local inmediatamente
+    setUnread?.(false);
+
+    // Marca leído en la BD para el rol actual
+    (async () => {
+      try {
+        const patch = meIsAdmin ? { unreadForAdmin: false } : { unreadForViewer: false };
+        await setDoc(doc(db, "meta", "messages"), patch, { merge: true });
+      } catch (e) {
+        console.error("No se pudo marcar como leído:", e);
+      }
+    })();
+
     setTimeout(() => inputRef.current?.focus(), 80);
-  }, [open, onUnread]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!open) return null;
 
   const canDelete = (m) => {
-    if (meIsAdmin) return true; // admin borra todo
-    return (m.fromUser || "").toLowerCase() === me; // usuario borra lo suyo
+    if (meIsAdmin) return true;
+    return (m.fromUser || "").toLowerCase() === me;
   };
 
   const requestDeleteMessage = (m) => {
     if (!canDelete(m)) return;
 
-    // Usuario normal: borra lo suyo sin confirmación
     if (!meIsAdmin) {
       deleteDoc(doc(db, "messages", m.id)).catch((e) => console.error(e));
       return;
     }
 
-    // Admin: requiere confirmar contraseña ANTES de borrar
     setPendingDeleteId(m.id);
     setConfirmOpen(true);
   };
@@ -150,7 +165,7 @@ export default function MessagesModal({
         ts: serverTimestamp(),
       });
 
-      // indicador de no-leídos (solo UI)
+      // ✅ indicador de no-leídos en meta/messages (para el otro rol)
       await setDoc(
         doc(db, "meta", "messages"),
         meIsAdmin
@@ -202,18 +217,16 @@ export default function MessagesModal({
                 const who = mine ? "" : displayName(fromLower);
                 const curDate = fmtTime(m.ts).slice(0, 10);
                 const prevDate = idx > 0 ? fmtTime(messages[idx - 1].ts).slice(0, 10) : null;
-                const clock = fmtTime(m.ts).slice(11); // hh:mm
 
                 return (
                   <React.Fragment key={m.id}>
-                    {/* Fecha centrada */}
                     {curDate !== prevDate && <div className="wa-date">{curDate}</div>}
 
                     <div className={`wa-row ${mine ? "mine" : "other"}`}>
                       <div className={`wa-bubble ${mine ? "mine" : "other"} ${m.fromRole === "ADMIN" ? "admin" : ""}`}>
-                        {/* Encabezado: nombre (solo otros) + delete (si puede) */}
                         <div className="wa-meta">
                           {!mine && <span className="wa-from">{who}</span>}
+                          <span className="wa-time">{fmtTime(m.ts).slice(11)}</span>
 
                           {canDelete(m) && (
                             <button className="wa-del" title="Eliminar" onClick={() => requestDeleteMessage(m)}>
@@ -223,11 +236,6 @@ export default function MessagesModal({
                         </div>
 
                         <div className="wa-text">{m.text}</div>
-
-                        {/* Hora abajo a la derecha, estilo WhatsApp */}
-                        <div className="wa-bubble-foot">
-                          <span className="wa-time">{clock}</span>
-                        </div>
                       </div>
                     </div>
                   </React.Fragment>

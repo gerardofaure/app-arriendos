@@ -142,3 +142,15 @@
   text-decoration: underline;
   font-weight: 800;
 }
+
+/* ===== Ajuste edición: Montos (input amplio + selector angosto) =====
+   En edición usamos <select className="inline-input"> dentro de un row flex.
+   La regla global .inline-input { width:100% } hacía que el select se "comiera" el espacio. */
+.history-modal .contract-grid select.inline-input{
+  width: 110px;
+  flex: 0 0 110px;
+}
+
+.history-modal .contract-grid input.inline-input{
+  min-width: 0; /* permite que el input use el espacio disponible sin colapsar raro */
+}

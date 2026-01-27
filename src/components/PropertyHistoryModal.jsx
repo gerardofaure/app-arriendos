@@ -48,7 +48,9 @@ function stripToEditableNumber(raw) {
 }
 
 function parseNumberLoose(raw) {
-  const s = String(raw || "").trim();
+  // Soporta valores "formateados" como "$1.000.000" o "2,5 U.F.".
+  // Dejamos solo dígitos, separadores y signo.
+  const s = String(raw || "").trim().replace(/[^\d,\.\-]/g, "");
   if (!s) return null;
   const normalized = s.replace(/\./g, "").replace(",", ".");
   const n = Number(normalized);
@@ -462,7 +464,7 @@ export default function PropertyHistoryModal({
                     style={{ flex: 1 }}
                     placeholder={valorUnit === "UF" ? "EJ: 2,5" : "EJ: 1000000"}
                     value={valorStr}
-                    onChange={(e) => setValorStr(e.target.value)}
+                    onChange={(e) => setValorStr(stripToEditableNumber(e.target.value))}
                     onFocus={() => onMoneyFocus(valorStr, setValorStr)}
                     onBlur={() => onMoneyBlur(valorStr, valorUnit, setValorStr)}
                   />
@@ -479,7 +481,7 @@ export default function PropertyHistoryModal({
                     style={{ flex: 1 }}
                     placeholder={multaUnit === "UF" ? "EJ: 1" : "EJ: 50000"}
                     value={multaStr}
-                    onChange={(e) => setMultaStr(e.target.value)}
+                    onChange={(e) => setMultaStr(stripToEditableNumber(e.target.value))}
                     onFocus={() => onMoneyFocus(multaStr, setMultaStr)}
                     onBlur={() => onMoneyBlur(multaStr, multaUnit, setMultaStr)}
                   />
@@ -496,7 +498,7 @@ export default function PropertyHistoryModal({
                     style={{ flex: 1 }}
                     placeholder={garUnit === "UF" ? "EJ: 2" : "EJ: 1000000"}
                     value={garStr}
-                    onChange={(e) => setGarStr(e.target.value)}
+                    onChange={(e) => setGarStr(stripToEditableNumber(e.target.value))}
                     onFocus={() => onMoneyFocus(garStr, setGarStr)}
                     onBlur={() => onMoneyBlur(garStr, garUnit, setGarStr)}
                   />

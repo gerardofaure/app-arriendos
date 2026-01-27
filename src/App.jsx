@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
   doc,
@@ -237,10 +237,10 @@ export default function App() {
   /* =========================
      Utils UI
   ========================= */
-  const showToast = (message, type = "info") => {
+  const showToast = useCallback((message, type = "info") => {
     setToast({ show: true, message, type });
     setTimeout(() => setToast((t) => ({ ...t, show: false })), 2200);
-  };
+  }, []);
 
   const requestPasswordConfirm = ({ title, message, confirmLabel, action }) => {
     pendingActionRef.current = action;
@@ -448,13 +448,44 @@ export default function App() {
   /* =========================
      Acciones
   ========================= */
-  const handleLogout = () => {
-    setRole(null);
-    setUsername("");
-    setEditing(false);
-    setOptionsOpen(false);
-    showToast("Sesión cerrada", "info");
-  };
+  const handleLogout = useCallback(
+    (message = "Sesión cerrada") => {
+      setRole(null);
+      setUsername("");
+      setEditing(false);
+      setOptionsOpen(false);
+      showToast(message, "info");
+    },
+    [showToast]
+  );
+
+  const handleDeleteOwner = useCallback(
+    async (ownerToDelete) => {
+      if (role !== "admin") {
+        showToast("Solo administradores", "error");
+        return;
+      }
+
+      const ok = window.confirm(
+        `¿Eliminar empresa "${ownerToDelete}"?\n\nEsto la quitará del listado (estructura). No borra historiales ya guardados en meses anteriores.`
+      );
+      if (!ok) return;
+
+      try {
+        const nextOwners = (owners || []).filter((o) => norm(o?.name) !== norm(ownerToDelete));
+        await setDoc(
+          doc(db, "structure", "owners"),
+          { owners: nextOwners, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+        showToast("Empresa eliminada", "success");
+      } catch (e) {
+        console.error(e);
+        showToast("Error al eliminar empresa", "error");
+      }
+    },
+    [role, owners, showToast]
+  );
 
   const handleLogin = (a, b) => {
     if (a && typeof a === "object") {
@@ -465,6 +496,46 @@ export default function App() {
     setRole(a || null);
     setUsername(b || "");
   };
+
+  /* =========================
+     Auto-logout por inactividad (5 min)
+  ========================= */
+  const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+  const idleTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (!role) return;
+
+    const resetTimer = () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(() => {
+        handleLogout("Sesión cerrada por inactividad (5 min).");
+      }, IDLE_TIMEOUT_MS);
+    };
+
+    const onActivity = () => resetTimer();
+    const onVisibility = () => {
+      // Al volver a la pestaña, lo consideramos actividad
+      if (!document.hidden) resetTimer();
+    };
+
+    // Arranca el contador al iniciar sesión
+    resetTimer();
+
+    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "pointerdown", "wheel"];
+    const opts = { passive: true };
+
+    events.forEach((ev) => window.addEventListener(ev, onActivity, opts));
+    window.addEventListener("focus", onActivity);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      events.forEach((ev) => window.removeEventListener(ev, onActivity, opts));
+      window.removeEventListener("focus", onActivity);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [role, handleLogout]);
 
   /* =========================
      Render
@@ -483,7 +554,7 @@ export default function App() {
             {/* Left */}
             <div className="header-title">
               <div className="title-stack">
-                <div className="app-title">{appTitle}</div>
+                <div className="app-title">{"INFORME MENSUAL DE ARRIENDOS"}</div>
                 <div className="app-user">{username}</div>
               </div>
             </div>
@@ -545,10 +616,22 @@ export default function App() {
                   <div className="hc-menu">
                     <div className="hc-label">Vista</div>
 
-                    <button className="hc-item" onClick={() => { setViewMode("MONTH"); setOptionsOpen(false); }}>
+                    <button
+                      className="hc-item"
+                      onClick={() => {
+                        setViewMode("MONTH");
+                        setOptionsOpen(false);
+                      }}
+                    >
                       Mes
                     </button>
-                    <button className="hc-item" onClick={() => { setViewMode("YEAR"); setOptionsOpen(false); }}>
+                    <button
+                      className="hc-item"
+                      onClick={() => {
+                        setViewMode("YEAR");
+                        setOptionsOpen(false);
+                      }}
+                    >
                       Año
                     </button>
 
@@ -586,23 +669,47 @@ export default function App() {
                       </button>
                     )}
 
-                    <button className="hc-item" onClick={() => { showToast("Totales listos", "info"); setOptionsOpen(false); }}>
+                    <button
+                      className="hc-item"
+                      onClick={() => {
+                        showToast("Totales listos", "info");
+                        setOptionsOpen(false);
+                      }}
+                    >
                       Totales
                     </button>
 
-                    <button className="hc-item" onClick={() => { setShowMissingContracts(true); setOptionsOpen(false); }}>
+                    <button
+                      className="hc-item"
+                      onClick={() => {
+                        setShowMissingContracts(true);
+                        setOptionsOpen(false);
+                      }}
+                    >
                       Contratos faltantes
                     </button>
 
                     {/* ✅ UF */}
-                    <button className="hc-item" onClick={() => { setShowUfModal(true); setOptionsOpen(false); }}>
+                    <button
+                      className="hc-item"
+                      onClick={() => {
+                        setShowUfModal(true);
+                        setOptionsOpen(false);
+                      }}
+                    >
                       Valor UF
                     </button>
 
                     {viewMode === "MONTH" && (
                       <>
                         <div className="hc-sep" />
-                        <button className="hc-item" onClick={() => { setShowReajustesModal(true); setOptionsOpen(false); }}>
+                        <button
+                          className="hc-item"
+                          onClick={() => {
+                            setShowReajustesModal(true);
+                            setOptionsOpen(false);
+                          }}
+                        >
                           Reajustes del mes
                         </button>
                       </>
@@ -691,6 +798,7 @@ export default function App() {
                           return { ...prev, [ok]: { ...od, [k]: status } };
                         });
                       }}
+                      onDeleteOwner={(ownerToDelete) => handleDeleteOwner(ownerToDelete)}
                       onClickProperty={(oName, pName) => {
                         setHistoryOwner(oName);
                         setHistoryProperty(pName);
@@ -754,8 +862,9 @@ export default function App() {
           ownerName={historyOwner}
           propertyName={historyProperty}
           loading={historyLoading}
-          series={historyData}
+          history={historyData}
           contract={historyContract}
+          role={role}
         />
 
         <ReajustesModal

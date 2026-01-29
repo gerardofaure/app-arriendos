@@ -9,6 +9,9 @@
   display: grid;
   place-items: center;
   padding: 22px 16px;
+
+  /* ✅ iOS/Safari: evita ajustes raros de texto/zoom */
+  -webkit-text-size-adjust: 100%;
 }
 
 .login-wrap{
@@ -98,6 +101,9 @@
   background: #fff;
   font-weight: 700;
   outline: none;
+
+  /* ✅ CLAVE: iPhone hace zoom si el input tiene <16px */
+  font-size: 16px;
 }
 
 .login-input:focus{
@@ -148,6 +154,9 @@
   font-weight: 950;
   background: var(--wa-green);
   color: #fff;
+
+  /* Mantiene consistencia con el input (y evita layouts raros en mobile) */
+  font-size: 16px;
 }
 
 .login-btn:hover{ background: var(--wa-green-hover); }

@@ -49,7 +49,6 @@ function stripToEditableNumber(raw) {
 
 function parseNumberLoose(raw) {
   // Soporta valores "formateados" como "$1.000.000" o "2,5 U.F.".
-  // Dejamos solo dígitos, separadores y signo.
   const s = String(raw || "").trim().replace(/[^\d,\.\-]/g, "");
   if (!s) return null;
   const normalized = s.replace(/\./g, "").replace(",", ".");
@@ -216,7 +215,7 @@ export default function PropertyHistoryModal({
     });
   }, [last6History]);
 
-  // Tabla contrato (label/value) mismo estilo
+  // Tabla contrato (label/value)
   const contratoRowsView = useMemo(() => {
     const reaj = reajuste.length ? reajuste.map((m) => MESES_ABR[m - 1]).join("-") : "---";
     const contratoTxt = contratoUrl ? "Ver contrato PDF" : "No disponible";
@@ -344,8 +343,11 @@ export default function PropertyHistoryModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card history-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">
-            {ownerName} / {propertyName}
+          {/* ✅ Título con estructura controlable por CSS (desktop vs mobile) */}
+          <div className="modal-title ph-title">
+            <span className="ph-owner">{ownerName}</span>
+            <span className="ph-sep"> / </span>
+            <span className="ph-prop">{propertyName}</span>
           </div>
 
           <div className="modal-actions">
@@ -402,7 +404,7 @@ export default function PropertyHistoryModal({
             </div>
           </div>
 
-          {/* CONTRATO en TABLA mismo estilo */}
+          {/* CONTRATO */}
           <div className="contract-card">
             <div className="section-title">Detalle de contrato</div>
 
@@ -535,7 +537,12 @@ export default function PropertyHistoryModal({
 
                 <div className="c-label">Contrato (URL)</div>
                 <div>
-                  <input className="inline-input" value={contratoUrl} onChange={(e) => setContratoUrl(e.target.value)} placeholder="https://..." />
+                  <input
+                    className="inline-input"
+                    value={contratoUrl}
+                    onChange={(e) => setContratoUrl(e.target.value)}
+                    placeholder="https://..."
+                  />
                 </div>
 
                 <div className="c-label">Reajuste</div>

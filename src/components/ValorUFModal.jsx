@@ -55,6 +55,15 @@ export default function ValorUFModal({ open, onClose }) {
 
   const hasUf = useMemo(() => Number(ufValue) > 0, [ufValue]);
 
+  const safeClose = useCallback(() => {
+    // ✅ iOS Safari: si un input queda enfocado, el zoom puede quedar “pegado”.
+    // Forzamos blur antes de cerrar el modal.
+    try {
+      document?.activeElement?.blur?.();
+    } catch {}
+    onClose?.();
+  }, [onClose]);
+
   const fetchUF = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -117,11 +126,11 @@ export default function ValorUFModal({ open, onClose }) {
   if (!open) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={safeClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">VALOR UF</div>
-          <button className="modal-close" onClick={onClose}>
+          <button className="modal-close" onClick={safeClose}>
             ×
           </button>
         </div>
@@ -190,7 +199,7 @@ export default function ValorUFModal({ open, onClose }) {
         </div>
 
         <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onClose}>
+          <button className="btn btn-secondary" onClick={safeClose}>
             Cerrar
           </button>
         </div>

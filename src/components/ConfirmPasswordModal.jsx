@@ -62,6 +62,16 @@ export default function ConfirmPasswordModal({
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const blurActive = () => {
+    // ✅ iOS Safari: evita que quede “pegado” el zoom si un input permanece enfocado
+    try { document?.activeElement?.blur?.(); } catch {}
+  };
+
+  const safeClose = () => {
+    blurActive();
+    onClose?.();
+  };
+
   useEffect(() => {
     if (!open) return;
     setPass("");
@@ -72,48 +82,38 @@ export default function ConfirmPasswordModal({
   if (!open) return null;
 
   const handleConfirm = async () => {
-    const p = (pass || "").trim();
-    if (!p) {
-      setErr("Ingresa tu contraseña");
-      return;
-    }
-
+    blurActive();
     setBusy(true);
     setErr("");
 
     try {
-      const userInput = (username || "").trim();
-      if (!userInput) {
-        setErr("Usuario no válido");
+      const res = await fetchUserByUsername(username);
+      if (!res) {
+        setErr("Usuario no encontrado");
         setBusy(false);
         return;
       }
 
-      const userRec = await fetchUserByUsername(userInput);
-      if (!userRec) {
-        setErr("Usuario no existe");
-        setBusy(false);
-        return;
-      }
+      const data = res.data || {};
+      const storedHash = String(data.passHash || data.passhash || data.passwordHash || "").toLowerCase();
 
-      const data = userRec.data || {};
-      const storedHash = data.passHash || data.passhash || "";
-      const hash = await sha256(p);
-
-      // Backward compatible (si existe algún usuario muy antiguo con password plano)
-      const plainOk = data.password && String(data.password) === String(p);
+      // Soporte extra (por si algunos usuarios antiguos tenían pass en texto plano)
+      const plainOk = String(data.password || data.pass || "") === String(pass || "");
 
       if (!storedHash) {
         if (!plainOk) {
-          setErr("Usuario sin contraseña configurada (passHash)");
+          setErr("Este usuario no tiene contraseña configurada");
           setBusy(false);
           return;
         }
-      } else if (hash !== storedHash) {
-        if (!plainOk) {
-          setErr("Contraseña incorrecta");
-          setBusy(false);
-          return;
+      } else {
+        const hash = await sha256(pass || "");
+        if (hash !== storedHash) {
+          if (!plainOk) {
+            setErr("Contraseña incorrecta");
+            setBusy(false);
+            return;
+          }
         }
       }
 
@@ -121,20 +121,21 @@ export default function ConfirmPasswordModal({
         await onConfirm();
       }
 
-      onClose?.();
+      safeClose();
     } catch (e) {
       setErr(e?.message ? String(e.message) : "No se pudo confirmar");
     } finally {
+      blurActive();
       setBusy(false);
     }
   };
 
   return (
-    <div className="modal-backdrop" onClick={() => !busy && onClose?.()}>
+    <div className="modal-backdrop" onClick={() => !busy && safeClose()}>
       <div className="modal-card confirmpass-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">{title}</div>
-          <button className="modal-close" onClick={() => !busy && onClose?.()}>
+          <button className="modal-close" onClick={() => !busy && safeClose()}>
             ×
           </button>
         </div>
@@ -152,18 +153,18 @@ export default function ConfirmPasswordModal({
             onChange={(e) => setPass(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") handleConfirm();
-              if (e.key === "Escape") !busy && onClose?.();
+              if (e.key === "Escape") !busy && safeClose();
             }}
           />
 
           {err && <div className="confirmpass-error">{err}</div>}
 
           <div className="confirmpass-actions">
-            <button className="btn btn-secondary" disabled={busy} onClick={() => onClose?.()}>
+            <button className="btn btn-secondary" disabled={busy} onClick={() => safeClose()}>
               Cancelar
             </button>
-            <button className="btn btn-primary" disabled={busy} onClick={handleConfirm}>
-              {busy ? "Validando…" : confirmLabel}
+            <button className="btn btn-primary" disabled={busy || !pass} onClick={handleConfirm}>
+              {busy ? "Confirmando…" : confirmLabel}
             </button>
           </div>
         </div>

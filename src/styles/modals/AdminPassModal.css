@@ -25,5 +25,30 @@
 }
 
 .ap-lab{ color: var(--muted); font-weight: 900; font-size: 12px; }
-.ap-in{ width: 100%; }
+
+/* Inputs / selects */
+.ap-in{
+  width: 100%;
+  height: 42px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-weight: 700;
+
+  /* ✅ iPhone/iOS: evita el zoom automático al enfocar inputs (<16px) */
+  font-size: 16px;
+}
+
+.ap-in:focus{
+  outline: none;
+  border-color: rgba(29,78,216,.50);
+  box-shadow: 0 0 0 4px var(--ring);
+}
+
 .ap-actions{ display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; }
+
+@media (max-width: 720px){
+  .ap-grid{ grid-template-columns: 1fr; }
+  .ap-lab{ margin-top: 6px; }
+}

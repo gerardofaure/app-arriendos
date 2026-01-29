@@ -78,6 +78,9 @@
 .uf-field input{
   height: 42px;
   font-weight: 700;
+
+  /* ✅ iPhone/iOS: evita zoom automático al enfocar inputs */
+  font-size: 16px;
 }
 
 .uf-result{

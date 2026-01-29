@@ -49,6 +49,16 @@ export default function AdminPassModal({ open, onClose }) {
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
+  const blurActive = () => {
+    // ✅ iOS Safari: si un input queda enfocado, el navegador puede dejar la vista “zoomeada”.
+    try { document?.activeElement?.blur?.(); } catch {}
+  };
+
+  const safeClose = () => {
+    blurActive();
+    onClose?.();
+  };
+
   useEffect(() => {
     if (!open) return;
     const q = query(collection(db, "users"), orderBy("username", "asc"));
@@ -118,6 +128,7 @@ export default function AdminPassModal({ open, onClose }) {
   };
 
   const goDetail = () => {
+    blurActive();
     setErr("");
     setOk("");
     if (!selectedId) {
@@ -129,6 +140,7 @@ export default function AdminPassModal({ open, onClose }) {
   };
 
   const goCreate = () => {
+    blurActive();
     setErr("");
     setOk("");
     setCUsername("");
@@ -140,6 +152,7 @@ export default function AdminPassModal({ open, onClose }) {
   };
 
   const handleSaveUser = async () => {
+    blurActive();
     if (!selectedUser) return;
     setBusy(true);
     setErr("");
@@ -152,7 +165,7 @@ export default function AdminPassModal({ open, onClose }) {
         return;
       }
 
-      // No cambiamos docId (para no romper referencias), pero sí guardamos campo username.
+      // No cambiar ID del doc si ya existe; actualiza campos.
       await setDoc(
         doc(db, "users", selectedUser.id),
         {
@@ -165,7 +178,7 @@ export default function AdminPassModal({ open, onClose }) {
         { merge: true }
       );
 
-      setOk("Datos guardados");
+      setOk("Usuario actualizado");
       clearMsgsSoon();
     } catch (e) {
       console.error(e);
@@ -177,31 +190,35 @@ export default function AdminPassModal({ open, onClose }) {
   };
 
   const handleChangePassword = async () => {
+    blurActive();
     if (!selectedUser) return;
-    const p = String(newPassword || "").trim();
-    if (!p) {
-      setErr("Ingresa la nueva contraseña");
-      clearMsgsSoon();
-      return;
-    }
     setBusy(true);
     setErr("");
     setOk("");
     try {
+      const p = String(newPassword || "");
+      if (!p || p.length < 4) {
+        setErr("Contraseña muy corta (mín 4)");
+        clearMsgsSoon();
+        return;
+      }
+      const h = await sha256(p);
+
       await setDoc(
         doc(db, "users", selectedUser.id),
         {
-          passHash: await sha256(p),
+          passHash: h,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
       );
+
       setNewPassword("");
       setOk("Contraseña actualizada");
       clearMsgsSoon();
     } catch (e) {
       console.error(e);
-      setErr("No se pudo actualizar la contraseña");
+      setErr("No se pudo actualizar");
       clearMsgsSoon();
     } finally {
       setBusy(false);
@@ -209,14 +226,12 @@ export default function AdminPassModal({ open, onClose }) {
   };
 
   const handleDeleteUser = async () => {
+    blurActive();
     if (!selectedUser) return;
 
-    const roleRaw = selectedUser.role || "viewer";
-    const roleClean = roleRaw === "user" ? "viewer" : roleRaw;
-
-    // Evita dejar el sistema sin admin
-    if (roleClean === "admin" && adminCount <= 1) {
-      setErr("Debe existir al menos un admin");
+    const role = (selectedUser.role || "viewer") === "admin" ? "admin" : "viewer";
+    if (role === "admin" && adminCount <= 1) {
+      setErr("No puedes eliminar el último admin");
       clearMsgsSoon();
       return;
     }
@@ -227,14 +242,11 @@ export default function AdminPassModal({ open, onClose }) {
     try {
       await deleteDoc(doc(db, "users", selectedUser.id));
       setOk("Usuario eliminado");
-
-      // Vuelve a selector y resetea
       setView("SELECT");
-      setSelectedId("");
       clearMsgsSoon();
     } catch (e) {
       console.error(e);
-      setErr("No se pudo eliminar el usuario");
+      setErr("No se pudo eliminar");
       clearMsgsSoon();
     } finally {
       setBusy(false);
@@ -242,46 +254,65 @@ export default function AdminPassModal({ open, onClose }) {
   };
 
   const handleCreateUser = async () => {
-    const u = normUser(cUsername);
-    const p = String(cPassword || "").trim();
-    if (!u || !p) {
-      setErr("Username y contraseña son obligatorios");
-      clearMsgsSoon();
-      return;
-    }
+    blurActive();
     setBusy(true);
     setErr("");
     setOk("");
     try {
-      await setDoc(doc(db, "users", u), {
-        username: u,
-        firstName: String(cFirstName || "").trim(),
-        lastName: String(cLastName || "").trim(),
-        role: cRole === "admin" ? "admin" : "viewer",
-        passHash: await sha256(p),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      const usernameClean = normUser(cUsername);
+      if (!usernameClean) {
+        setErr("El username es obligatorio");
+        clearMsgsSoon();
+        return;
+      }
+      const pass = String(cPassword || "");
+      if (!pass || pass.length < 4) {
+        setErr("Contraseña muy corta (mín 4)");
+        clearMsgsSoon();
+        return;
+      }
+
+      const h = await sha256(pass);
+
+      // DocId = usernameClean (más simple para tu sistema)
+      await setDoc(
+        doc(db, "users", usernameClean),
+        {
+          username: usernameClean,
+          firstName: String(cFirstName || "").trim(),
+          lastName: String(cLastName || "").trim(),
+          role: cRole === "admin" ? "admin" : "viewer",
+          passHash: h,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
 
       setOk("Usuario creado");
-      setSelectedId(u);
-      setView("DETAIL");
+      setView("SELECT");
       clearMsgsSoon();
     } catch (e) {
       console.error(e);
-      setErr("No se pudo crear el usuario (¿ya existe?)");
+      setErr("No se pudo crear");
       clearMsgsSoon();
     } finally {
       setBusy(false);
     }
   };
 
+  const labelOf = (u) => {
+    const r = (u.role || "viewer") === "admin" ? "Admin" : "Usuario";
+    const name = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
+    return `${u.username || u.id}${name ? ` — ${name}` : ""} (${r})`;
+  };
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={safeClose}>
       <div className="modal-card adminpass-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">Usuarios</div>
-          <button className="modal-close" onClick={onClose}>
+          <button className="modal-close" onClick={safeClose}>
             ×
           </button>
         </div>
@@ -290,31 +321,15 @@ export default function AdminPassModal({ open, onClose }) {
           <div className="ap-shell">
             {/* Topbar / navegación */}
             <div className="ap-topbar">
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                {view !== "SELECT" && (
-                  <button className="btn btn-secondary" onClick={() => setView("SELECT")} disabled={busy}>
-                    Volver
-                  </button>
-                )}
-                <button className="btn btn-secondary" onClick={goCreate} disabled={busy}>
-                  Crear usuario
-                </button>
-              </div>
-
-              {/* Selector */}
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                 <select
-                  className="ap-select"
+                  className="select ap-select"
                   value={selectedId}
                   onChange={(e) => setSelectedId(e.target.value)}
                   disabled={busy || !users.length}
-                  title="Seleccionar usuario"
                 >
-                  {!users.length && <option value="">Sin usuarios</option>}
                   {users.map((u) => {
-                    const roleRaw = u.role || "viewer";
-                    const roleClean = roleRaw === "user" ? "viewer" : roleRaw;
-                    const label = `${u.username || u.id} ${roleClean === "admin" ? "(admin)" : ""}`.trim();
+                    const label = labelOf(u);
                     return (
                       <option key={u.id} value={u.id}>
                         {label}
@@ -325,6 +340,12 @@ export default function AdminPassModal({ open, onClose }) {
 
                 <button className="btn btn-primary" onClick={goDetail} disabled={busy || !selectedId}>
                   Gestionar
+                </button>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button className="btn btn-secondary" onClick={goCreate} disabled={busy}>
+                  Crear usuario
                 </button>
               </div>
             </div>

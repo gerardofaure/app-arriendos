@@ -28,6 +28,9 @@
 
   /* Helvetica */
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  /* ✅ Evita “text auto zoom” raro en algunos móviles */
+  -webkit-text-size-adjust: 100%;
 }
 
 .wa-head{
@@ -162,6 +165,9 @@
   font-weight: 700;
   background: #fff;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  /* ✅ CLAVE: evita el zoom automático en iOS al enfocar */
+  font-size: 16px;
 }
 
 .wa-send{
@@ -174,6 +180,9 @@
   font-weight: 900;
   letter-spacing: .2px;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  /* Para que el botón no se vea “chico” al lado del input */
+  font-size: 16px;
 }
 .wa-send:hover{ background: var(--wa-green-hover) !important; }
 .wa-send:active{ background: var(--wa-green-pressed) !important; transform: translateY(1px); }

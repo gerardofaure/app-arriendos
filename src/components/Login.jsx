@@ -171,6 +171,11 @@ export default function Login({ onSuccess, onLogin }) {
       console.error(err);
       setError("No se pudo iniciar sesión");
     } finally {
+      // ✅ iOS Safari: si el input queda enfocado, el zoom puede “quedarse pegado”.
+      // Forzamos blur al finalizar el submit (éxito o error).
+      try {
+        document?.activeElement?.blur?.();
+      } catch {}
       setBusy(false);
     }
   };

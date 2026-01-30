@@ -1,0 +1,44 @@
+/* ============================================================
+   AddOwnerModal (Agregar empresa)
+   - Usa ModalBase.css
+   ============================================================ */
+
+.addowner-card{
+  width: min(620px, 92vw);
+}
+
+.addowner-help{
+  color: var(--muted);
+  font-weight: 650;
+  margin-bottom: 14px;
+  line-height: 1.35;
+}
+
+.addowner-label{
+  display: grid;
+  gap: 8px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.addowner-input{
+  width: 100%;
+}
+
+.addowner-error{
+  margin-top: 10px;
+  color: #B91C1C;
+  font-weight: 800;
+}
+
+.addowner-foot{
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Error style */
+.inline-input.is-error{
+  border-color: rgba(185,28,28,.55);
+  box-shadow: 0 0 0 4px rgba(185,28,28,.12);
+}

@@ -19,6 +19,7 @@ import MessagesModal from "./components/MessagesModal.jsx";
 import ReajustesModal from "./components/ReajustesModal.jsx";
 import AdminPassModal from "./components/AdminPassModal.jsx";
 import ConfirmPasswordModal from "./components/ConfirmPasswordModal.jsx";
+import AddOwnerModal from "./components/AddOwnerModal.jsx";
 import MissingContractsModal from "./components/MissingContractsModal.jsx";
 import ValorUFModal from "./components/ValorUFModal.jsx";
 import { getLast12MonthIds } from "./utils/months.js";
@@ -87,67 +88,54 @@ function prevMonthId(monthId) {
    App
 ========================= */
 export default function App() {
-  const today = new Date();
-
-  /* -------------------------
-     Login
-  ------------------------- */
-  const [role, setRole] = useState(null); // "admin" | "viewer" | null
+  const [role, setRole] = useState(null);
   const [username, setUsername] = useState("");
 
-  /* -------------------------
-     Vista
-  ------------------------- */
-  const [viewMode, setViewMode] = useState("MONTH"); // "MONTH" | "YEAR"
-  const [selectedMonthId, setSelectedMonthId] = useState(monthIdFromDate(today));
-  const [selectedYear, setSelectedYear] = useState(today.getFullYear());
-
-  useEffect(() => {
-    const y = Number(String(selectedMonthId || "").split("-")[0] || today.getFullYear());
-    if (!Number.isNaN(y)) setSelectedYear(y);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMonthId]);
-
-  const prevMonthIdValue = useMemo(() => prevMonthId(selectedMonthId), [selectedMonthId]);
-
-  // Selector SIEMPRE desde el mes actual hacia atrás (12)
-  const monthOptions = useMemo(() => {
-    const ids = getLast12MonthIds(monthIdFromDate(today));
-    return ids.map((id) => ({ id, label: labelFromMonthId(id) }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* -------------------------
-     Datos
-  ------------------------- */
   const [owners, setOwners] = useState([]);
   const [ownerFilter, setOwnerFilter] = useState("ALL");
 
-  const [dataCurrent, setDataCurrent] = useState({});
-  const [dataPrev, setDataPrev] = useState({});
-  const [dataAnnual, setDataAnnual] = useState({});
+  const monthOptions = useMemo(() => {
+    const ids = getLast12MonthIds(new Date());
+    return ids.map((id) => ({ id, label: labelFromMonthId(id) }));
+  }, []);
+
+  const [viewMode, setViewMode] = useState("MONTH"); // MONTH | YEAR
+  const [selectedMonthId, setSelectedMonthId] = useState(monthOptions?.[0]?.id || monthIdFromDate(new Date()));
+
   const [loading, setLoading] = useState(false);
 
-  /* -------------------------
-     Edición
-  ------------------------- */
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [dataCurrent, setDataCurrent] = useState({});
+  const [dataPrev, setDataPrev] = useState({});
+  const [dataAnnual, setDataAnnual] = useState({}); // año completo por empresa/prop
 
-  /* -------------------------
-     Dropdown opciones
-  ------------------------- */
+  const [editing, setEditing] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const optionsRef = useRef(null);
+
+  /* -------------------------
+     Toast
+  ------------------------- */
+  const [toast, setToast] = useState(null);
+  const toastTimerRef = useRef(null);
+
+  const showToast = useCallback((message, type = "info", title = "") => {
+    const t = {
+      title: title || (type === "success" ? "OK" : type === "error" ? "Ups" : "Info"),
+      message,
+      type,
+    };
+    setToast(t);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 2700);
+  }, []);
 
   /* -------------------------
      Mensajes
   ------------------------- */
   const [messagesOpen, setMessagesOpen] = useState(false);
-  const [messagesUnread, setMessagesUnread] = useState(false);
 
   /* -------------------------
-     Modales
+     Historial propiedad
   ------------------------- */
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyOwner, setHistoryOwner] = useState("");
@@ -160,6 +148,7 @@ export default function App() {
   const [showAdminPass, setShowAdminPass] = useState(false);
   const [showMissingContracts, setShowMissingContracts] = useState(false);
   const [showUfModal, setShowUfModal] = useState(false);
+  const [showAddOwnerModal, setShowAddOwnerModal] = useState(false);
 
   /* -------------------------
      Contratos (cache)
@@ -168,92 +157,36 @@ export default function App() {
   const [contractsBusy, setContractsBusy] = useState(false);
 
   /* -------------------------
-     Confirmación de contraseña
+     Confirmación de contraseña (guardar)
   ------------------------- */
   const [confirmPassOpen, setConfirmPassOpen] = useState(false);
   const [confirmPassConfig, setConfirmPassConfig] = useState({
-    title: "Confirmar contraseña",
-    message: "Para continuar, ingresa tu contraseña.",
+    title: "Confirmar",
+    message: "Confirma con tu contraseña",
     confirmLabel: "Confirmar",
+    action: null,
   });
-  const pendingActionRef = useRef(null);
 
-  /* -------------------------
-     Toast
-  ------------------------- */
-  const [toast, setToast] = useState({ show: false, message: "", type: "info" });
-
-  const appTitle = "INFORME MENSUAL DE ARRIENDOS";
-
-  /* =========================
-     Sesión (localStorage)
-  ========================= */
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("app_arriendos_session");
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed?.role && parsed?.username) {
-        setRole(parsed.role);
-        setUsername(parsed.username);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      if (role && username) {
-        localStorage.setItem("app_arriendos_session", JSON.stringify({ role, username }));
-      } else {
-        localStorage.removeItem("app_arriendos_session");
-      }
-    } catch {
-      // ignore
-    }
-  }, [role, username]);
-
-  /* =========================
-     🔥 Listener real-time de NO LEÍDOS
-     (esto es lo que faltaba para que palpite)
-  ========================= */
-  useEffect(() => {
-    if (!role) return;
-
-    const unsub = onSnapshot(
-      doc(db, "meta", "messages"),
-      (snap) => {
-        const d = snap.exists() ? snap.data() || {} : {};
-        const flag = role === "admin" ? !!d.unreadForAdmin : !!d.unreadForViewer;
-        setMessagesUnread(flag);
-      },
-      () => setMessagesUnread(false)
-    );
-
-    return () => unsub();
-  }, [role]);
-
-  /* =========================
-     Utils UI
-  ========================= */
-  const showToast = useCallback((message, type = "info") => {
-    setToast({ show: true, message, type });
-    setTimeout(() => setToast((t) => ({ ...t, show: false })), 2200);
-  }, []);
-
-  const requestPasswordConfirm = ({ title, message, confirmLabel, action }) => {
-    pendingActionRef.current = action;
-    setConfirmPassConfig({ title, message, confirmLabel });
+  const requestPasswordConfirm = useCallback((cfg) => {
+    setConfirmPassConfig({
+      title: cfg?.title || "Confirmar",
+      message: cfg?.message || "Confirma con tu contraseña",
+      confirmLabel: cfg?.confirmLabel || "Confirmar",
+      action: cfg?.action || null,
+    });
     setConfirmPassOpen(true);
-  };
+  }, []);
+
+  const [saving, setSaving] = useState(false);
 
   /* =========================
-     Click-outside dropdown
+     Close options on outside click
   ========================= */
   useEffect(() => {
     const onDown = (e) => {
-      if (optionsOpen && optionsRef.current && !optionsRef.current.contains(e.target)) setOptionsOpen(false);
+      if (!optionsOpen) return;
+      if (!optionsRef.current) return;
+      if (!optionsRef.current.contains(e.target)) setOptionsOpen(false);
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
@@ -279,141 +212,81 @@ export default function App() {
 
     setLoading(true);
 
-    const unsubCurr = onSnapshot(
-      doc(db, "rents", selectedMonthId),
-      (snap) => {
-        setDataCurrent(snap.exists() ? snap.data() || {} : {});
-        setLoading(false);
-      },
-      () => {
-        setDataCurrent({});
-        setLoading(false);
-      }
-    );
+    const unsubCurr = onSnapshot(doc(db, "rents", selectedMonthId), (snap) => {
+      const d = snap.exists() ? snap.data() || {} : {};
+      const payload = d.data || d || {};
+      // si viene con {data:{...}} lo usamos, si no, el doc entero
+      const raw = payload?.data ? payload.data : payload;
+      // remover campos de meta
+      const { updatedAt, ...clean } = raw || {};
+      setDataCurrent(clean || {});
+      setLoading(false);
+    });
 
-    const unsubPrev = onSnapshot(
-      doc(db, "rents", prevMonthIdValue),
-      (snap) => setDataPrev(snap.exists() ? snap.data() || {} : {}),
-      () => setDataPrev({})
-    );
+    const prevId = prevMonthId(selectedMonthId);
+    const unsubPrev = onSnapshot(doc(db, "rents", prevId), (snap) => {
+      const d = snap.exists() ? snap.data() || {} : {};
+      const payload = d.data || d || {};
+      const raw = payload?.data ? payload.data : payload;
+      const { updatedAt, ...clean } = raw || {};
+      setDataPrev(clean || {});
+    });
 
     return () => {
-      try { unsubCurr && unsubCurr(); } catch {}
-      try { unsubPrev && unsubPrev(); } catch {}
+      unsubCurr();
+      unsubPrev();
     };
-  }, [viewMode, selectedMonthId, prevMonthIdValue]);
+  }, [selectedMonthId, viewMode]);
 
   /* =========================
-     AÑO: suma rents del año
+     AÑO: annual/<YYYY>
   ========================= */
   useEffect(() => {
     if (viewMode !== "YEAR") return;
+    setLoading(true);
 
-    (async () => {
-      setLoading(true);
-      try {
-        const y = String(selectedYear);
-        const snap = await getDocs(collection(db, "rents"));
+    const year = String(selectedMonthId || monthIdFromDate(new Date())).slice(0, 4);
+    const ref = doc(db, "annual", year);
 
-        const agg = {};
-        snap.forEach((d) => {
-          const id = d.id || "";
-          if (!id.startsWith(`${y}-`)) return;
+    const unsub = onSnapshot(ref, (snap) => {
+      const d = snap.exists() ? snap.data() || {} : {};
+      const payload = d.data || d || {};
+      const raw = payload?.data ? payload.data : payload;
+      const { updatedAt, ...clean } = raw || {};
+      setDataAnnual(clean || {});
+      setLoading(false);
+    });
 
-          const monthData = d.data() || {};
-          Object.keys(monthData).forEach((ownerName) => {
-            const block = monthData[ownerName];
-            if (!block || typeof block !== "object") return;
-
-            if (!agg[ownerName]) agg[ownerName] = {};
-            Object.keys(block).forEach((propName) => {
-              if (String(propName).endsWith("__obs")) return;
-              if (String(propName).endsWith("__ontime")) return;
-              const v = Number(block[propName] || 0);
-              if (!agg[ownerName][propName]) agg[ownerName][propName] = 0;
-              agg[ownerName][propName] += v;
-            });
-          });
-        });
-
-        setDataAnnual(agg);
-      } catch {
-        setDataAnnual({});
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [viewMode, selectedYear]);
+    return () => unsub();
+  }, [selectedMonthId, viewMode]);
 
   /* =========================
-     Historial + contrato
+     Contratos (collection: contracts)
   ========================= */
+  const loadContracts = useCallback(async () => {
+    setContractsBusy(true);
+    try {
+      const snap = await getDocs(collection(db, "contracts"));
+      const map = {};
+      snap.forEach((d) => {
+        const v = d.data() || {};
+        map[d.id] = v;
+      });
+      setContractsMap(map);
+    } catch (e) {
+      console.error(e);
+      showToast("No se pudieron cargar contratos", "error");
+    } finally {
+      setContractsBusy(false);
+    }
+  }, [showToast]);
+
   useEffect(() => {
-    if (!historyOpen) return;
-    if (!historyOwner || !historyProperty) return;
-
-    (async () => {
-      setHistoryLoading(true);
-      try {
-        const cid = canonicalContractId(historyOwner, historyProperty);
-        const cSnap = await getDoc(doc(db, "contracts", cid));
-        setHistoryContract(cSnap.exists() ? cSnap.data() || null : null);
-
-        const ids = getLast12MonthIds(monthIdFromDate(today)).slice().reverse();
-
-        const docs = await Promise.all(
-          ids.map(async (id) => {
-            const s = await getDoc(doc(db, "rents", id));
-            return { id, data: s.exists() ? s.data() || {} : {} };
-          })
-        );
-
-        const series = docs.map(({ id, data }) => {
-          const ownerKey = pickKeyCI(data, historyOwner);
-          const ownerBlock = ownerKey ? data[ownerKey] : {};
-          const propKey = pickKeyCI(ownerBlock, historyProperty);
-          const value = propKey ? Number(ownerBlock[propKey] || 0) : 0;
-          return { monthId: id, monthLabel: labelFromMonthId(id), value };
-        });
-
-        setHistoryData(series);
-      } catch (e) {
-        console.error(e);
-        setHistoryContract(null);
-        setHistoryData([]);
-      } finally {
-        setHistoryLoading(false);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [historyOpen, historyOwner, historyProperty]);
+    loadContracts();
+  }, [loadContracts]);
 
   /* =========================
-     Cargar contratos
-  ========================= */
-  useEffect(() => {
-    if (!showReajustesModal && !showMissingContracts) return;
-    if (contractsBusy) return;
-
-    (async () => {
-      setContractsBusy(true);
-      try {
-        const snap = await getDocs(collection(db, "contracts"));
-        const map = {};
-        snap.forEach((d) => (map[d.id] = d.data() || {}));
-        setContractsMap(map);
-      } catch (e) {
-        console.error(e);
-        setContractsMap({});
-      } finally {
-        setContractsBusy(false);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showReajustesModal, showMissingContracts]);
-
-  /* =========================
-     Totales
+     Totales KPI
   ========================= */
   const totalGeneralMonth = useMemo(() => {
     let sum = 0;
@@ -444,6 +317,8 @@ export default function App() {
     });
     return sum;
   }, [owners, dataAnnual]);
+
+  const totalKpiValue = viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear;
 
   /* =========================
      Acciones
@@ -487,6 +362,50 @@ export default function App() {
     [role, owners, showToast]
   );
 
+  const handleAddOwner = useCallback(
+    async (newOwnerName) => {
+      if (role !== "admin") {
+        showToast("Solo administradores", "error");
+        return;
+      }
+
+      const clean = String(newOwnerName || "").trim();
+      if (!clean) {
+        showToast("Nombre inválido", "error");
+        return;
+      }
+
+      const exists = (owners || []).some((o) => norm(o?.name) === norm(clean));
+      if (exists) {
+        showToast("Esa empresa ya existe", "error");
+        return;
+      }
+
+      try {
+        const nextOwners = [
+          ...(owners || []),
+          { name: clean, properties: [] },
+        ].sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || ""), "es-CL"));
+
+        await setDoc(
+          doc(db, "structure", "owners"),
+          { owners: nextOwners, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+
+        // Crea bloque vacío en el mes actual para que no falle si se espera el owner key
+        setDataCurrent((prev) => ({ ...(prev || {}), [clean]: prev?.[clean] || {} }));
+
+        showToast("Empresa agregada", "success");
+        setShowAddOwnerModal(false);
+      } catch (e) {
+        console.error(e);
+        showToast("Error al agregar empresa", "error");
+      }
+    },
+    [role, owners, showToast]
+  );
+
   const handleLogin = (a, b) => {
     if (a && typeof a === "object") {
       setRole(a.role || null);
@@ -509,42 +428,65 @@ export default function App() {
     const resetTimer = () => {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       idleTimerRef.current = setTimeout(() => {
-        handleLogout("Sesión cerrada por inactividad (5 min).");
+        handleLogout("Sesión cerrada por inactividad");
       }, IDLE_TIMEOUT_MS);
     };
 
-    const onActivity = () => resetTimer();
-    const onVisibility = () => {
-      // Al volver a la pestaña, lo consideramos actividad
-      if (!document.hidden) resetTimer();
-    };
-
-    // Arranca el contador al iniciar sesión
     resetTimer();
 
-    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "pointerdown", "wheel"];
-    const opts = { passive: true };
-
-    events.forEach((ev) => window.addEventListener(ev, onActivity, opts));
-    window.addEventListener("focus", onActivity);
-    document.addEventListener("visibilitychange", onVisibility);
-
+    const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
+    events.forEach((ev) => window.addEventListener(ev, resetTimer, { passive: true }));
     return () => {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-      events.forEach((ev) => window.removeEventListener(ev, onActivity, opts));
-      window.removeEventListener("focus", onActivity);
-      document.removeEventListener("visibilitychange", onVisibility);
+      events.forEach((ev) => window.removeEventListener(ev, resetTimer));
     };
   }, [role, handleLogout]);
 
   /* =========================
+     Historial de propiedad (últimos 6 meses)
+  ========================= */
+  const loadHistory = useCallback(async () => {
+    if (!historyOwner || !historyProperty) return;
+    setHistoryLoading(true);
+    try {
+      const months = getLast12MonthIds(new Date()).slice(0, 6);
+      const rows = [];
+      for (const mid of months.reverse()) {
+        const snap = await getDoc(doc(db, "rents", mid));
+        const d = snap.exists() ? snap.data() || {} : {};
+        const payload = d.data || d || {};
+        const raw = payload?.data ? payload.data : payload;
+
+        const okOwner = pickKeyCI(raw, historyOwner);
+        const block = okOwner ? raw[okOwner] : null;
+        const val = block
+          ? block[Object.keys(block).find((k) => norm(k) === norm(historyProperty))] ?? 0
+          : 0;
+
+        rows.push({ monthId: mid, value: Number(val || 0) });
+      }
+
+      setHistoryData(rows);
+
+      const cid = canonicalContractId(historyOwner, historyProperty);
+      setHistoryContract(contractsMap?.[cid] || null);
+    } catch (e) {
+      console.error(e);
+      showToast("Error cargando historial", "error");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [historyOwner, historyProperty, contractsMap, showToast]);
+
+  useEffect(() => {
+    if (!historyOpen) return;
+    loadHistory();
+  }, [historyOpen, loadHistory]);
+
+  /* =========================
      Render
   ========================= */
-  if (!role) {
-    return <Login onLogin={handleLogin} />;
-  }
-
-  const totalKpiValue = viewMode === "MONTH" ? totalGeneralMonth : totalGeneralYear;
+  if (!role) return <Login onLogin={handleLogin} />;
 
   return (
     <div className="app-shell">
@@ -594,10 +536,7 @@ export default function App() {
 
             {/* Right */}
             <div className="header-actions">
-              <button
-                className={`btn btn-secondary ${messagesUnread ? "with-dot pulse" : ""}`}
-                onClick={() => setMessagesOpen(true)}
-              >
+              <button className="btn btn-secondary" onClick={() => setMessagesOpen(true)}>
                 Mensajes
               </button>
 
@@ -743,6 +682,19 @@ export default function App() {
             </div>
           </div>
 
+          {/* Acciones rápidas (solo admin en edición mensual) */}
+          {role === "admin" && editing && viewMode === "MONTH" && (
+            <div className="header-subrow">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowAddOwnerModal(true)}
+                title="Agregar empresa"
+              >
+                + Agregar empresa
+              </button>
+            </div>
+          )}
+
           {/* KPI Total general */}
           <div className="kpi-strip">
             <div className="kpi-card">
@@ -794,12 +746,159 @@ export default function App() {
                         setDataCurrent((prev) => {
                           const ok = pickKeyCI(prev, ownerName) ?? ownerName;
                           const od = prev?.[ok] || {};
-                          const k = `${propertyName}__ontime`;
-                          return { ...prev, [ok]: { ...od, [k]: status } };
+                          const key = `${propertyName}__status`;
+                          return { ...prev, [ok]: { ...od, [key]: status } };
                         });
                       }}
-                      onDeleteOwner={(ownerToDelete) => handleDeleteOwner(ownerToDelete)}
-                      onClickProperty={(oName, pName) => {
+                      onChangeOwnerName={async (oldName, newName) => {
+                        if (role !== "admin") return;
+
+                        const clean = String(newName || "").trim();
+                        if (!clean) return;
+
+                        const exists = (owners || []).some((o) => norm(o?.name) === norm(clean));
+                        if (exists) {
+                          showToast("Ese nombre ya existe", "error");
+                          return;
+                        }
+
+                        const nextOwners = (owners || []).map((o) => {
+                          if (norm(o?.name) !== norm(oldName)) return o;
+                          return { ...o, name: clean };
+                        });
+
+                        try {
+                          await setDoc(
+                            doc(db, "structure", "owners"),
+                            { owners: nextOwners, updatedAt: serverTimestamp() },
+                            { merge: true }
+                          );
+                          // renombra keys del mes actual (solo visual)
+                          setDataCurrent((prev) => {
+                            const okOld = pickKeyCI(prev, oldName);
+                            if (!okOld) return prev;
+                            const block = prev?.[okOld] || {};
+                            const { [okOld]: _, ...rest } = prev || {};
+                            return { ...rest, [clean]: block };
+                          });
+                          showToast("Empresa renombrada", "success");
+                        } catch (e) {
+                          console.error(e);
+                          showToast("Error al renombrar", "error");
+                        }
+                      }}
+                      onChangePropertyName={async (ownerName, oldProp, newProp) => {
+                        if (role !== "admin") return;
+
+                        const clean = String(newProp || "").trim();
+                        if (!clean) return;
+
+                        try {
+                          const nextOwners = (owners || []).map((o) => {
+                            if (norm(o?.name) !== norm(ownerName)) return o;
+                            const props = (o.properties || []).map((p) =>
+                              norm(p) === norm(oldProp) ? clean : p
+                            );
+                            return { ...o, properties: props };
+                          });
+
+                          await setDoc(
+                            doc(db, "structure", "owners"),
+                            { owners: nextOwners, updatedAt: serverTimestamp() },
+                            { merge: true }
+                          );
+
+                          // renombra key en datos del mes actual si existe
+                          setDataCurrent((prev) => {
+                            const okOwner = pickKeyCI(prev, ownerName) ?? ownerName;
+                            const od = prev?.[okOwner] || {};
+                            const pk = Object.keys(od).find((k) => norm(k) === norm(oldProp));
+                            if (!pk) return prev;
+                            const val = od[pk];
+
+                            // mueve obs/status también si existieran
+                            const obsOld = `${oldProp}__obs`;
+                            const stOld = `${oldProp}__status`;
+                            const obsKey = Object.keys(od).find((k) => norm(k) === norm(obsOld)) || obsOld;
+                            const stKey = Object.keys(od).find((k) => norm(k) === norm(stOld)) || stOld;
+
+                            const next = { ...od };
+                            delete next[pk];
+                            next[clean] = val;
+
+                            if (obsKey in od) {
+                              const v = od[obsKey];
+                              delete next[obsKey];
+                              next[`${clean}__obs`] = v;
+                            }
+                            if (stKey in od) {
+                              const v = od[stKey];
+                              delete next[stKey];
+                              next[`${clean}__status`] = v;
+                            }
+
+                            return { ...prev, [okOwner]: next };
+                          });
+
+                          showToast("Propiedad renombrada", "success");
+                        } catch (e) {
+                          console.error(e);
+                          showToast("Error al renombrar propiedad", "error");
+                        }
+                      }}
+                      onAddProperty={async (ownerName) => {
+                        if (role !== "admin") return;
+
+                        const prop = window.prompt("Nombre de la nueva propiedad:");
+                        const clean = String(prop || "").trim();
+                        if (!clean) return;
+
+                        try {
+                          const nextOwners = (owners || []).map((o) => {
+                            if (norm(o?.name) !== norm(ownerName)) return o;
+                            const props = Array.from(new Set([...(o.properties || []), clean]));
+                            return { ...o, properties: props };
+                          });
+
+                          await setDoc(
+                            doc(db, "structure", "owners"),
+                            { owners: nextOwners, updatedAt: serverTimestamp() },
+                            { merge: true }
+                          );
+
+                          showToast("Propiedad agregada", "success");
+                        } catch (e) {
+                          console.error(e);
+                          showToast("Error al agregar propiedad", "error");
+                        }
+                      }}
+                      onDeleteProperty={async (ownerName, propName) => {
+                        if (role !== "admin") return;
+
+                        const ok = window.confirm(`¿Eliminar propiedad "${propName}"?`);
+                        if (!ok) return;
+
+                        try {
+                          const nextOwners = (owners || []).map((o) => {
+                            if (norm(o?.name) !== norm(ownerName)) return o;
+                            const props = (o.properties || []).filter((p) => norm(p) !== norm(propName));
+                            return { ...o, properties: props };
+                          });
+
+                          await setDoc(
+                            doc(db, "structure", "owners"),
+                            { owners: nextOwners, updatedAt: serverTimestamp() },
+                            { merge: true }
+                          );
+
+                          showToast("Propiedad eliminada", "success");
+                        } catch (e) {
+                          console.error(e);
+                          showToast("Error al eliminar propiedad", "error");
+                        }
+                      }}
+                      onDeleteOwner={(oName) => handleDeleteOwner(oName)}
+                      onClickProp={(oName, pName) => {
                         setHistoryOwner(oName);
                         setHistoryProperty(pName);
                         setHistoryOpen(true);
@@ -811,50 +910,47 @@ export default function App() {
           )}
 
           {!loading && viewMode === "YEAR" && (
-            <div className="annual-wrap">
-              <div className="annual-title">Resumen anual {selectedYear}</div>
-              <div className="annual-table">
-                <div className="annual-row annual-head">
-                  <div>Empresa</div>
-                  <div>Propiedad</div>
-                  <div style={{ textAlign: "right" }}>Total</div>
-                </div>
+            <div className="annual-grid">
+              <div className="annual-row annual-head">
+                <div>Empresa</div>
+                <div>Propiedad</div>
+                <div style={{ textAlign: "right" }}>Total</div>
+              </div>
 
-                {(owners || [])
-                  .filter((o) => ownerFilter === "ALL" || o.name === ownerFilter)
-                  .flatMap((o) =>
-                    (o.properties || []).map((p) => {
-                      const ok = pickKeyCI(dataAnnual, o.name);
-                      const block = ok ? dataAnnual[ok] : {};
-                      const pk = pickKeyCI(block, p);
-                      const value = pk ? Number(block[pk] || 0) : 0;
-                      return { owner: o.name, prop: p, value };
-                    })
-                  )
-                  .map((r, idx) => (
-                    <div key={`${r.owner}-${r.prop}-${idx}`} className="annual-row">
-                      <div>{r.owner}</div>
-                      <div>{r.prop}</div>
-                      <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
-                        {moneyCLP0(r.value)}
+              {(owners || [])
+                .filter((o) => ownerFilter === "ALL" || o.name === ownerFilter)
+                .flatMap((o) => (o.properties || []).map((p) => ({ owner: o.name, prop: p })))
+                .map(({ owner, prop }) => {
+                  const okOwner = pickKeyCI(dataAnnual, owner);
+                  const block = okOwner ? dataAnnual[okOwner] : null;
+                  const pk = block ? Object.keys(block).find((k) => norm(k) === norm(prop)) : null;
+                  const val = pk ? Number(block[pk] || 0) : 0;
+                  return (
+                    <div className="annual-row" key={`${owner}__${prop}`}>
+                      <div>{owner}</div>
+                      <div>{prop}</div>
+                      <div style={{ textAlign: "right", fontWeight: 900 }}>
+                        {moneyCLP0(val)}
                       </div>
                     </div>
-                  ))}
-              </div>
+                  );
+                })}
             </div>
           )}
         </main>
 
-        {toast.show && <div className={`toast ${toast.type}`}>{toast.message}</div>}
+        {/* Toast */}
+        {toast && (
+          <div className="toast-wrap">
+            <div className={"toast " + toast.type}>
+              <div className="toast-title">{toast.title}</div>
+              <div className="toast-msg">{toast.message}</div>
+            </div>
+          </div>
+        )}
 
-        {/* ✅ Mensajes: pasamos role + callback correcto */}
-        <MessagesModal
-          open={messagesOpen}
-          onClose={() => setMessagesOpen(false)}
-          role={role}
-          username={username}
-          onUnread={(hasUnread) => setMessagesUnread(!!hasUnread)}
-        />
+        {/* Modals */}
+        <MessagesModal open={messagesOpen} onClose={() => setMessagesOpen(false)} />
 
         <PropertyHistoryModal
           open={historyOpen}
@@ -862,31 +958,20 @@ export default function App() {
           ownerName={historyOwner}
           propertyName={historyProperty}
           loading={historyLoading}
-          history={historyData}
+          rows={historyData}
           contract={historyContract}
-          role={role}
         />
 
         <ReajustesModal
           open={showReajustesModal}
           onClose={() => setShowReajustesModal(false)}
-          monthNumber={Number(String(selectedMonthId).split("-")[1] || 1)}
-          owners={owners}
-          resolveContract={(o, p) => {
-            const id = canonicalContractId(o, p);
-            return contractsMap?.[id] || null;
-          }}
-          onGo={(oName, pName) => {
-            setShowReajustesModal(false);
-            setHistoryOwner(oName);
-            setHistoryProperty(pName);
-            setHistoryOpen(true);
-          }}
+          monthId={selectedMonthId}
         />
 
         <MissingContractsModal
           open={showMissingContracts}
           onClose={() => setShowMissingContracts(false)}
+          busy={contractsBusy}
           owners={owners}
           resolveContract={(o, p) => {
             const id = canonicalContractId(o, p);
@@ -900,6 +985,13 @@ export default function App() {
           }}
         />
 
+        <AddOwnerModal
+          open={showAddOwnerModal}
+          onClose={() => setShowAddOwnerModal(false)}
+          existingNames={(owners || []).map((o) => o.name)}
+          onConfirm={(name) => handleAddOwner(name)}
+        />
+
         <ValorUFModal open={showUfModal} onClose={() => setShowUfModal(false)} />
         <AdminPassModal open={showAdminPass} onClose={() => setShowAdminPass(false)} />
 
@@ -910,14 +1002,17 @@ export default function App() {
           message={confirmPassConfig.message}
           confirmLabel={confirmPassConfig.confirmLabel}
           onClose={() => setConfirmPassOpen(false)}
-          onConfirm={async () => {
+          onConfirm={async (passOk) => {
+            setConfirmPassOpen(false);
+            if (!passOk) {
+              showToast("Contraseña incorrecta", "error");
+              return;
+            }
             try {
-              const fn = pendingActionRef.current;
-              pendingActionRef.current = null;
-              if (typeof fn === "function") await fn();
+              await confirmPassConfig?.action?.();
             } catch (e) {
               console.error(e);
-              showToast("Acción cancelada", "error");
+              showToast("Error", "error");
             }
           }}
         />

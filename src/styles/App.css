@@ -15,10 +15,14 @@
   width: min(1240px, 100%);
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 20px;
-  box-shadow: var(--shadow);
+  border-radius: 22px;
   overflow: hidden;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
 }
+
+/* =========================
+   Header
+========================= */
 
 .app-header{
   background: linear-gradient(180deg, #FFFFFF 0%, var(--surface-2) 100%);
@@ -86,15 +90,19 @@
   border: 1px solid var(--border);
   background: #fff;
   color: var(--text);
-  font-weight: 600;
-  font-size: 13px;
-  box-shadow: 0 1px 0 rgba(15,23,42,.03);
-  cursor: pointer;
+  font-weight: 800;
+  letter-spacing: .2px;
+  outline: none;
+  box-shadow: 0 0 0 0 transparent;
+  transition: box-shadow .15s ease, border-color .15s ease, transform .05s ease;
+}
+
+.control-select:hover{
+  border-color: rgba(29, 78, 216, .35);
 }
 
 .control-select:focus{
-  outline: none;
-  border-color: rgba(29,78,216,.50);
+  border-color: rgba(29, 78, 216, .55);
   box-shadow: 0 0 0 4px var(--ring);
 }
 
@@ -110,6 +118,20 @@
   height: 38px;
 }
 
+/* --- Sub-row under header (left actions) --- */
+.header-subrow{
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* En móvil, evita que se rompa feo */
+@media (max-width: 720px){
+  .header-subrow{ flex-wrap: wrap; }
+}
+
 /* KPI strip */
 .kpi-strip{
   display: flex;
@@ -120,138 +142,203 @@
 .kpi-card{
   min-width: 260px;
   border-radius: 16px;
-  padding: 12px 14px;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, rgba(29,78,216,.95) 0%, rgba(29,78,216,.78) 100%);
   color: #fff;
-  background: linear-gradient(135deg, #2F80ED 0%, #1B5FD6 100%);
-  box-shadow: 0 10px 22px rgba(15,23,42,.14);
+  box-shadow: 0 10px 24px rgba(29, 78, 216, 0.22);
 }
 
 .kpi-label{
+  font-weight: 800;
   font-size: 12px;
-  font-weight: 600;
-  opacity: .92;
-  letter-spacing: .2px;
+  opacity: .85;
 }
 
 .kpi-value{
-  margin-top: 4px;
+  margin-top: 2px;
+  font-weight: 900;
   font-size: 22px;
+  letter-spacing: .2px;
+}
+
+/* =========================
+   Body
+========================= */
+
+.app-body{
+  padding: 18px;
+}
+
+.loading{
+  text-align: center;
+  padding: 28px 10px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+/* Grid para OwnerGroup(s) */
+.main-grid{
+  display: grid;
+  gap: 14px;
+}
+
+/* =========================
+   Toast
+========================= */
+
+.toast-wrap{
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  gap: 10px;
+  z-index: 100;
+}
+
+.toast{
+  width: min(360px, 92vw);
+  border-radius: 14px;
+  padding: 12px 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(15,23,42,.10);
+  display: grid;
+  gap: 6px;
+}
+
+.toast-title{
+  font-weight: 900;
+  color: var(--text);
+}
+
+.toast-msg{
+  color: var(--muted);
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
 }
 
-.app-body{ padding: 16px 18px 18px 18px; }
-
-/* Indicador de no-leídos */
-.with-dot{ position: relative; }
-.with-dot::after{
-  content: "";
-  position: absolute;
-  top: 7px;
-  right: 10px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #ef4444;
-  box-shadow: 0 0 0 3px #fff;
+.toast.success{
+  border-color: rgba(22, 163, 74, .25);
+  background: var(--successBg);
 }
 
-/* Palpito del botón Mensajes cuando hay no leídos */
-.btn.pulse{
-  animation: btnPulse 1.2s ease-in-out infinite;
+.toast.success .toast-title{
+  color: var(--successText);
 }
 
-@keyframes btnPulse{
-  0%{ transform: translateZ(0) scale(1); box-shadow: 0 1px 0 rgba(15,23,42,.03); }
-  50%{ transform: translateZ(0) scale(1.03); box-shadow: 0 0 0 6px rgba(29,78,216,.16); }
-  100%{ transform: translateZ(0) scale(1); box-shadow: 0 1px 0 rgba(15,23,42,.03); }
+.toast.error{
+  border-color: rgba(185, 28, 28, .25);
+  background: var(--dangerBg);
 }
 
-/* ---------- Dropdown genérico (Opciones) ---------- */
-.hc-block{ position: relative; display: inline-flex; }
+.toast.error .toast-title{
+  color: var(--dangerText);
+}
+
+/* =========================
+   Header compact (mobile)
+========================= */
+
+@media (max-width: 920px){
+  .header-row{
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .header-actions{
+    justify-content: flex-start;
+  }
+
+  .kpi-strip{
+    justify-content: flex-start;
+  }
+
+  .kpi-card{
+    width: 100%;
+    min-width: unset;
+  }
+
+  .control-select{
+    min-width: 100%;
+  }
+}
+
+/* =========================
+   Dropdown (Opciones)
+========================= */
+
+.hc-block{ position: relative; }
 
 .hc-button{
   appearance: none;
   cursor: pointer;
+  user-select: none;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 900;
+  letter-spacing: .2px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: var(--primary);
-  color: #fff;
-  font-weight: 700;
-  border: 1px solid transparent;
+  transition: box-shadow .15s ease, border-color .15s ease, transform .05s ease;
 }
 
-.hc-button:hover{ background: var(--primaryHover); }
-.hc-button:active{ background: #163AA8; transform: translateY(1px); }
+.hc-button:hover{
+  border-color: rgba(29, 78, 216, .35);
+}
 
-.hc-caret{ opacity: .9; }
+.hc-button:active{
+  transform: translateY(1px);
+}
+
+.hc-caret{
+  font-size: 12px;
+  opacity: .75;
+}
 
 .hc-menu{
   position: absolute;
   right: 0;
-  top: calc(100% + 10px);
-  z-index: 50;
-  min-width: 250px;
-  background: var(--card);
+  top: calc(100% + 8px);
+  width: 240px;
+  background: #fff;
   border: 1px solid var(--border);
   border-radius: 16px;
-  box-shadow: var(--shadow);
-  padding: 8px;
+  overflow: hidden;
+  box-shadow: 0 18px 40px rgba(15,23,42,.12);
+  z-index: 50;
 }
 
 .hc-label{
-  padding: 8px 10px 6px 10px;
-  color: var(--muted);
+  padding: 10px 12px;
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .2px;
+  font-weight: 900;
+  color: var(--muted);
+  background: linear-gradient(180deg, #fff 0%, rgba(243,246,251,.6) 100%);
+  border-bottom: 1px solid rgba(217,226,242,.7);
 }
 
 .hc-item{
   width: 100%;
-  display: flex;
-  justify-content: flex-start;
   text-align: left;
-  background: transparent;
-  color: var(--text);
-  border-radius: 12px;
   padding: 10px 12px;
-  font-weight: 600;
   border: 0;
+  background: transparent;
   cursor: pointer;
+  font-weight: 850;
+  color: var(--text);
+  transition: background .12s ease;
 }
 
-.hc-item:hover{ background: rgba(29,78,216,.08); }
-
-.hc-sep{ height: 1px; background: var(--border); margin: 8px 6px; }
-
-/* ---------- Main ---------- */
-.main-grid{ display: grid; gap: 14px; grid-template-columns: 1fr; }
-
-/* ---------- Responsive base ---------- */
-@media (max-width: 1024px){
-  .header-row{ grid-template-columns: 1fr; justify-items: stretch; }
-  .header-filters{ justify-content: flex-start; }
-  .header-actions{ justify-content: flex-start; }
-  .control-select{ width: 100%; max-width: none; }
-  .kpi-strip{ justify-content: flex-start; }
-  .kpi-card{ width: 100%; }
+.hc-item:hover{
+  background: rgba(29,78,216,.06);
 }
 
-@media (max-width: 520px){
-  .app-shell{ padding: 12px; }
-  .app-header{ padding: 14px; }
-  .app-body{ padding: 14px; }
-
-  /* ✅ Dropdown Opciones: centrado y dentro de pantalla en iPhone */
-  .hc-menu{
-    left: 50%;
-    right: auto;
-    transform: translateX(-50%);
-    width: min(92vw, 320px);
-    min-width: 0;
-  }
+.hc-sep{
+  height: 1px;
+  background: rgba(217,226,242,.8);
 }
+
+/* ===== End App.css ===== */
